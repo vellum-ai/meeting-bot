@@ -1,0 +1,9 @@
+node_modules/
+bun.lock
+*.log
+
+# Plugin runtime state written into the plugin directory by the host.
+config.json
+data/
+.disabled
+install-meta.json

@@ -1,0 +1,19 @@
+{
+  "name": "@vellumai/meeting-bot",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Send a note-taking bot to a meeting via Recall.ai. Recall drives the browser/join; the plugin stands up a realtime WebSocket receiver for live transcript and participant events.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": ["meeting", "bot", "recall", "transcription", "realtime"],
+  "peerDependencies": {
+    "@vellumai/plugin-api": "^0.10.3"
+  },
+  "dependencies": {
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "1.2.4",
+    "typescript": "5.7.3"
+  }
+}
