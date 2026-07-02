@@ -9,13 +9,20 @@
  *
  * ## What the operator must supply
  *
- *   - `apiKey`      — the Recall.ai workspace API key. Used as the
- *                     `Authorization` header on every Create-Bot / leave call.
  *   - `publicWsUrl` — the stable, publicly reachable base URL Recall dials
  *                     back into over WebSocket for realtime events (e.g. a
  *                     static ngrok `wss://…` URL in dev, or the deployment's
  *                     ingress in prod). The plugin's own WebSocket server must
  *                     be reachable at this address.
+ *
+ * The Recall API key is deliberately *not* a config field. Config carries only
+ * the credential's *name* (`apiKeyCredential`, default `recall:api_key`) so the
+ * secret itself can live in the secure credential store / CES rather than as
+ * plaintext in `config.json`. It is resolved from the environment at call time
+ * (see {@link resolveApiKey}); the host provisions the secret into that env
+ * from the credential store. Because the name defaults to `recall:api_key`, an
+ * operator storing the key under that default name needs no config for it at
+ * all — `config.json` then holds nothing sensitive.
  *
  * Everything else has a working default. The realtime server binds locally on
  * `listenHost:listenPort`; a reverse proxy / tunnel maps `publicWsUrl` onto it.
@@ -59,11 +66,15 @@ export type RealtimeEvent = (typeof REALTIME_EVENTS)[number];
 
 export const MeetingBotConfigSchema = z
   .object({
-    apiKey: z
+    apiKeyCredential: z
       .string()
-      .min(1)
+      .regex(
+        /^[^\s:]+:[^\s:]+$/,
+        "must be a credential name of the form 'service:field' (e.g. recall:api_key)",
+      )
+      .default("recall:api_key")
       .describe(
-        "Recall.ai workspace API key. Sent as the Authorization header on Create-Bot and leave-call requests.",
+        "Name of the credential holding the Recall.ai workspace API key, in 'service:field' form. The secret itself is NOT stored here — it lives in the secure credential store / CES and is resolved from the environment at call time. Defaults to 'recall:api_key'; only set this when the key is stored under a different name.",
       ),
     region: z
       .enum(RECALL_REGIONS)
@@ -128,7 +139,7 @@ export const MeetingBotConfigSchema = z
       }),
   })
   .describe(
-    "Recall.ai meeting-bot configuration — API credentials, region, the realtime WebSocket callback URL, and transcription settings.",
+    "Recall.ai meeting-bot configuration — the API-key credential name, region, the realtime WebSocket callback URL, and transcription settings.",
   );
 
 export type MeetingBotConfig = z.infer<typeof MeetingBotConfigSchema>;
@@ -141,8 +152,11 @@ export interface ConfigResolution {
 
 /**
  * Validate and default the host-supplied config. Throws a descriptive error
- * when required fields (`apiKey`, `publicWsUrl`) are missing, since the plugin
- * cannot create bots or receive events without them.
+ * when `publicWsUrl` is missing, since the plugin cannot receive events without
+ * it. The API key is not validated here — it is resolved separately from the
+ * environment at call time (see {@link resolveApiKey}), so a misconfigured or
+ * absent credential surfaces as a clear tool-time error rather than blocking
+ * the realtime receiver from starting.
  */
 export function resolveConfig(raw: unknown): ConfigResolution {
   const parsed = MeetingBotConfigSchema.safeParse(raw ?? {});
@@ -173,6 +187,42 @@ export function resolveConfig(raw: unknown): ConfigResolution {
 /** Base URL for the region's Recall REST API, with a trailing slash. */
 export function recallApiBase(region: RecallRegion): string {
   return `https://${region}.recall.ai/api/v1/`;
+}
+
+/**
+ * Map a `service:field` credential name to the environment variable the secret
+ * is expected under: `recall:api_key` → `RECALL_API_KEY`. Non-alphanumeric
+ * separators (`:`, `-`, `.`, `/`) collapse to `_` and the whole name is
+ * upper-cased, matching the conventional env-var shape a host injects a
+ * credential-store value into.
+ */
+export function credentialEnvVar(credentialName: string): string {
+  return credentialName.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+}
+
+/**
+ * Resolve the Recall API key from the environment.
+ *
+ * The secret is never read from `config.json`; config only names the credential
+ * ({@link MeetingBotConfig.apiKeyCredential}, default `recall:api_key`). The
+ * host provisions that credential's value into the process environment from the
+ * secure credential store / CES, under the {@link credentialEnvVar}-derived
+ * name. Resolving at call time (rather than caching at init) means a rotated
+ * key is picked up and the plaintext is never stashed in plugin state.
+ *
+ * Throws a descriptive error naming both the credential and the expected env
+ * var when the value is absent — the caller (a tool) surfaces that to the user.
+ */
+export function resolveApiKey(config: MeetingBotConfig): string {
+  const envVar = credentialEnvVar(config.apiKeyCredential);
+  const value = (process.env[envVar] ?? "").trim();
+  if (!value) {
+    throw new Error(
+      `Recall API key not found. The credential "${config.apiKeyCredential}" must be provisioned into the environment as ${envVar} ` +
+        `(the host injects it from the secure credential store / CES). It is intentionally never stored in config.json.`,
+    );
+  }
+  return value;
 }
 
 /**

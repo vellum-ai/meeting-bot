@@ -51,12 +51,24 @@ meetings — one listener demultiplexes every concurrent bot by bot id.
 ## Configuration
 
 The host passes config to the `init` hook as `InitContext.config`. See
-[`src/config.ts`](src/config.ts) for the full schema. Required fields:
+[`src/config.ts`](src/config.ts) for the full schema. Required field:
 
 | Field         | Description                                                              |
 | ------------- | ------------------------------------------------------------------------ |
-| `apiKey`      | Recall.ai workspace API key (region-scoped).                             |
 | `publicWsUrl` | Stable public base URL (`wss://…`) Recall dials back into for realtime.  |
+
+### API key
+
+The Recall API key is **not** a config field. `config.json` carries only the
+credential's *name* — `apiKeyCredential`, defaulting to `recall:api_key` — so
+the secret itself lives in the secure credential store / CES rather than as
+plaintext in config. Because the name defaults, an operator who stores the key
+under `recall:api_key` needs no config for it at all.
+
+At call time the plugin resolves the secret from the environment, under the
+variable derived from the credential name (`recall:api_key` → `RECALL_API_KEY`).
+The host provisions that value from the credential store. Set `apiKeyCredential`
+only when the key is stored under a different name.
 
 Notable optional fields: `region` (default `us-east-1`), `listenHost` /
 `listenPort` (where the realtime server binds locally), `verificationToken`
