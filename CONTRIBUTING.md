@@ -32,26 +32,52 @@ convenience, not a reproducible pin.
 
 ## Setting up credentials
 
-The plugin's `init` hook needs its config — at minimum the Recall.ai `apiKey`
-and the public `publicWsUrl` Recall dials back into — before the realtime server
-can start. See [Configuration](README.md#configuration) for the full field list.
+Two things get the plugin ready: the **Recall API key** (a secret) and the
+plugin **config** (which is not secret). They are stored in different places on
+purpose.
 
-Config reaches the plugin as `InitContext.config`, resolved from
-`<workspace>/plugins/meeting-bot/config.json` (a JSON object of the config
-fields). There are two ways to get it there.
+### The Recall API key (the secret)
 
-### Before installing
+The API key is **not** stored in config. Store it in the secure credential store
+under the name `recall:api_key` (service `recall`, field `api_key`):
+
+```bash
+assistant credentials set --service recall --field api_key "recall_..."
+```
+
+At call time the plugin resolves the key from the environment, under the
+variable derived from that name — `recall:api_key` → `RECALL_API_KEY` — which the
+host provisions from the credential store. For a quick local dev run you can
+export it yourself:
+
+```bash
+export RECALL_API_KEY="recall_..."
+```
+
+If you store the key under a different name, set `apiKeyCredential` in the config
+(below) to that `service:field` name; otherwise leave it unset and the default
+`recall:api_key` is used.
+
+### The config (not secret)
+
+The `init` hook needs `publicWsUrl` — the public URL Recall dials back into —
+before the realtime server can start. See
+[Configuration](README.md#configuration) for the full field list. Config reaches
+the plugin as `InitContext.config`, resolved from
+`<workspace>/plugins/meeting-bot/config.json`. There are two ways to get it
+there.
+
+#### Before installing
 
 The plugin directory doesn't exist until you install, but you can pre-seed the
-credentials in the workspace's global `config.json` under a `plugins.meeting-bot`
+config in the workspace's global `config.json` under a `plugins.meeting-bot`
 block:
 
 ```jsonc
-// <workspace>/config.json
+// <workspace>/config.json — no API key here; it lives in the credential store
 {
   "plugins": {
     "meeting-bot": {
-      "apiKey": "recall_...",
       "publicWsUrl": "wss://your-tunnel.example.com",
       "region": "us-east-1"
     }
@@ -63,14 +89,13 @@ Then install. On the plugin's first `init`, that block is migrated into
 `<workspace>/plugins/meeting-bot/config.json` automatically, so your setup keeps
 working without further manual steps.
 
-### After installing
+#### After installing
 
 Write the config file directly into the installed plugin directory:
 
 ```bash
 cat > "$VELLUM_WORKSPACE_DIR/plugins/meeting-bot/config.json" <<'JSON'
 {
-  "apiKey": "recall_...",
   "publicWsUrl": "wss://your-tunnel.example.com",
   "region": "us-east-1"
 }
@@ -79,7 +104,7 @@ JSON
 
 Note the shapes differ: the global-config form nests the fields under
 `plugins.meeting-bot`, while the per-plugin `config.json` **is** the config
-object directly (no wrapping key).
+object directly (no wrapping key). Neither form contains the API key.
 
 > **Local dev tip:** Recall needs a stable public URL to dial back into, so put
 > a static `ngrok` tunnel in front of `listenHost:listenPort` and point

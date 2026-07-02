@@ -19,9 +19,13 @@
 
 import type { InitContext } from "@vellumai/plugin-api";
 
-import { resolveConfig } from "../src/config.ts";
+import {
+  credentialEnvVar,
+  realtimeEndpointUrl,
+  resolveApiKey,
+  resolveConfig,
+} from "../src/config.ts";
 import { setResolvedConfig } from "../src/plugin-state.ts";
-import { realtimeEndpointUrl } from "../src/config.ts";
 import { startRealtimeServer } from "../src/realtime-server.ts";
 
 const init = async (ctx: InitContext): Promise<void> => {
@@ -31,6 +35,21 @@ const init = async (ctx: InitContext): Promise<void> => {
   }
 
   setResolvedConfig(config);
+
+  // Surface a missing API-key credential early (non-fatal): the realtime
+  // receiver can still start, but join/leave will fail until the secret is
+  // provisioned into the environment from the credential store.
+  try {
+    resolveApiKey(config);
+  } catch (err) {
+    ctx.logger.warn(
+      {
+        credential: config.apiKeyCredential,
+        envVar: credentialEnvVar(config.apiKeyCredential),
+      },
+      `meeting-bot: ${String(err)}`,
+    );
+  }
 
   try {
     startRealtimeServer(config, ctx.logger);

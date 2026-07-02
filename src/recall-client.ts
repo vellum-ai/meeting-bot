@@ -10,12 +10,15 @@
  *   - ask a bot to leave.
  *
  * All calls are region-scoped and authenticated with the workspace API key in
- * the `Authorization` header, matching the Recall Create-Bot reference.
+ * the `Authorization` header, matching the Recall Create-Bot reference. The key
+ * is resolved from the environment per call (see `resolveApiKey`) rather than
+ * read from config, so the secret never lives in `config.json`.
  */
 
 import {
   realtimeEndpointUrl,
   recallApiBase,
+  resolveApiKey,
   type MeetingBotConfig,
 } from "./config.ts";
 
@@ -38,9 +41,9 @@ export class RecallApiError extends Error {
   }
 }
 
-function authHeaders(config: MeetingBotConfig): Record<string, string> {
+function authHeaders(apiKey: string): Record<string, string> {
   return {
-    Authorization: config.apiKey,
+    Authorization: apiKey,
     Accept: "application/json",
     "Content-Type": "application/json",
   };
@@ -101,7 +104,7 @@ export async function createBot(
 
   const res = await fetch(`${recallApiBase(config.region)}bot/`, {
     method: "POST",
-    headers: authHeaders(config),
+    headers: authHeaders(resolveApiKey(config)),
     body: JSON.stringify(body),
   });
 
@@ -127,7 +130,7 @@ export async function leaveCall(
 ): Promise<void> {
   const res = await fetch(
     `${recallApiBase(config.region)}bot/${encodeURIComponent(botId)}/leave_call/`,
-    { method: "POST", headers: authHeaders(config) },
+    { method: "POST", headers: authHeaders(resolveApiKey(config)) },
   );
   if (!res.ok) {
     const text = await res.text();
@@ -146,7 +149,7 @@ export async function getBot(
 ): Promise<RecallBot> {
   const res = await fetch(
     `${recallApiBase(config.region)}bot/${encodeURIComponent(botId)}/`,
-    { method: "GET", headers: authHeaders(config) },
+    { method: "GET", headers: authHeaders(resolveApiKey(config)) },
   );
   const text = await res.text();
   if (!res.ok) {
