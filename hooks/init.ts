@@ -25,7 +25,8 @@ import {
   resolveApiKey,
   resolveConfig,
 } from "../src/config.ts";
-import { setResolvedConfig } from "../src/plugin-state.ts";
+import { resolveAssistantName } from "../src/identity.ts";
+import { setAssistantName, setResolvedConfig } from "../src/plugin-state.ts";
 import { startRealtimeServer } from "../src/realtime-server.ts";
 
 const init = async (ctx: InitContext): Promise<void> => {
@@ -35,6 +36,24 @@ const init = async (ctx: InitContext): Promise<void> => {
   }
 
   setResolvedConfig(config);
+
+  // Resolve the assistant's display name from IDENTITY.md so bots can join
+  // as the assistant rather than Recall's generic "Meeting Notetaker". A
+  // missing or unparsable identity is non-fatal: the join tool simply omits
+  // the name and Recall falls back to its workspace default.
+  const name = resolveAssistantName(ctx.pluginStorageDir);
+  if (name) {
+    setAssistantName(name);
+    ctx.logger.info(
+      { assistantName: name },
+      "meeting-bot: resolved assistant name from IDENTITY.md for bot display name",
+    );
+  } else {
+    ctx.logger.debug(
+      {},
+      "meeting-bot: no assistant name found in IDENTITY.md — bots will use the Recall workspace default name",
+    );
+  }
 
   // Surface a missing API-key credential early (non-fatal): the realtime
   // receiver can still start, but join/leave will fail until the secret is

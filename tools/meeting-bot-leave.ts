@@ -14,6 +14,7 @@ import {
 
 import { leaveCall, RecallApiError } from "../src/recall-client.ts";
 import { requireConfig } from "../src/plugin-state.ts";
+import { clearTranscriptBuffer } from "../src/realtime-server.ts";
 import { closeSession, listSessions } from "../src/session-store.ts";
 
 interface LeaveParams {
@@ -66,11 +67,13 @@ export const meetingBotLeave: ToolDefinition = {
 
     try {
       await leaveCall(config, botId);
+      clearTranscriptBuffer(botId);
       closeSession(botId);
       return { content: `Bot ${botId} is leaving the meeting.`, isError: false };
     } catch (err) {
       if (err instanceof RecallApiError) {
         // The local session is stale regardless of the API outcome; drop it.
+        clearTranscriptBuffer(botId);
         closeSession(botId);
         return {
           content: `Recall reported an error leaving (${err.status}): ${err.body.slice(0, 300)}. Local session cleared.`,

@@ -37,8 +37,11 @@ import {
   RealtimeMessageSchema,
   extractParticipantEvent,
   extractUtterance,
+  type NormalizedUtterance,
 } from "./realtime-events.ts";
 import {
+  closeSession,
+  getSession,
   recordParticipantEvent,
   recordUtterance,
 } from "./session-store.ts";
@@ -70,6 +73,27 @@ const READY_TIMEOUT_MS = 10_000;
 const STOP_GRACE_MS = 5_000;
 /** Time to wait after SIGTERM before SIGKILL. */
 const KILL_GRACE_MS = 3_000;
+
+/**
+ * Debounce window for transcript buffering. When no new finalized transcript
+ * event arrives for this duration, the buffered lines are flushed to the
+ * conversation for LLM processing. A typical speaking pause is well under a
+ * second, so this catches sentence/clause boundaries without holding content
+ * so long that the assistant loses real-time awareness.
+ */
+const TRANSCRIPT_FLUSH_DEBOUNCE_MS = 1_000;
+
+/**
+ * Per-session transcript buffer and debounce timer, keyed by bot id. The
+ * buffer accumulates finalized utterances; the timer fires the flush when the
+ * stream goes quiet for {@link TRANSCRIPT_FLUSH_DEBOUNCE_MS}.
+ */
+interface BufferState {
+  lines: { speaker: string; text: string }[];
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+const transcriptBuffers = new Map<string, BufferState>();
 
 interface RunningServer {
   child: ChildProcess;
@@ -250,6 +274,12 @@ export async function stopRealtimeServer(): Promise<void> {
   }
 
   running = null;
+  // Cancel any pending transcript flush timers so they don't fire after the
+  // receiver is down.
+  for (const [botId, state] of transcriptBuffers) {
+    if (state.timer) clearTimeout(state.timer);
+    transcriptBuffers.delete(botId);
+  }
   logger.info({}, "meeting-bot: realtime server stopped");
 }
 
@@ -338,7 +368,17 @@ function dispatchEvent(
 
   if (msg.event.startsWith("transcript.")) {
     const utterance = extractUtterance(msg);
-    if (utterance) recordUtterance(utterance);
+    if (utterance) {
+      // Always record finalized utterances in the session store (existing
+      // behavior). recordUtterance already skips partials.
+      recordUtterance(utterance);
+
+      // Buffer finalized utterances and debounce a flush to the conversation.
+      // Partials churn too fast and are not useful for LLM processing.
+      if (!utterance.isPartial && utterance.botId) {
+        bufferTranscript(utterance.botId, utterance, logger);
+      }
+    }
     return;
   }
 
@@ -349,4 +389,98 @@ function dispatchEvent(
   }
 
   logger.debug({ event: msg.event }, "meeting-bot: unhandled realtime event");
+}
+
+/**
+ * Add a finalized utterance to the per-session buffer and (re)arm the debounce
+ * timer. When the stream goes quiet for {@link TRANSCRIPT_FLUSH_DEBOUNCE_MS},
+ * the buffer is flushed to the conversation.
+ */
+function bufferTranscript(
+  botId: string,
+  utterance: NormalizedUtterance,
+  logger: Logger,
+): void {
+  let state = transcriptBuffers.get(botId);
+  if (!state) {
+    state = { lines: [], timer: null };
+    transcriptBuffers.set(botId, state);
+  }
+
+  state.lines.push({
+    speaker: utterance.speakerName ?? utterance.speakerId ?? "unknown",
+    text: utterance.text,
+  });
+
+  if (state.timer) clearTimeout(state.timer);
+  state.timer = setTimeout(() => {
+    void flushTranscriptBuffer(botId, logger);
+  }, TRANSCRIPT_FLUSH_DEBOUNCE_MS);
+}
+
+/**
+ * Flush the buffered transcript for a session to the conversation via the
+ * daemon's HTTP API (`POST /v1/messages`). Errors are logged but never thrown
+ * — a failed flush must not crash the realtime receiver.
+ */
+async function flushTranscriptBuffer(botId: string, logger: Logger): Promise<void> {
+  const state = transcriptBuffers.get(botId);
+  if (!state) return;
+
+  // Clear the timer reference and grab the lines atomically.
+  state.timer = null;
+  const lines = state.lines;
+  state.lines = [];
+
+  if (lines.length === 0) return;
+
+  const session = getSession(botId);
+  if (!session || !session.conversationId) {
+    // No conversation to flush to — the lines are already in the session
+    // store transcript, so dropping them from the buffer is safe.
+    return;
+  }
+
+  const content =
+    `Live transcript from meeting ${session.meetingUrl}:\n` +
+    lines.map((l) => `[${l.speaker}]: ${l.text}`).join("\n");
+
+  const port = process.env.RUNTIME_HTTP_PORT ?? "7821";
+  const url = `http://localhost:${port}/v1/messages`;
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationId: session.conversationId,
+        content,
+        automated: true,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger.warn(
+        { status: res.status, body: body.slice(0, 200), botId },
+        "meeting-bot: transcript flush to conversation returned non-OK status",
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { error: String(err).slice(0, 200), botId },
+      "meeting-bot: transcript flush to conversation failed (non-fatal)",
+    );
+  }
+}
+
+/**
+ * Clear the transcript buffer and cancel any pending flush timer for a session.
+ * Called when a session is closed so a late timer does not fire into a dead
+ * session.
+ */
+export function clearTranscriptBuffer(botId: string): void {
+  const state = transcriptBuffers.get(botId);
+  if (!state) return;
+  if (state.timer) clearTimeout(state.timer);
+  transcriptBuffers.delete(botId);
 }

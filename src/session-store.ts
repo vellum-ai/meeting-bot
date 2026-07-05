@@ -27,6 +27,7 @@ export interface TranscriptLine {
 export interface MeetingSession {
   botId: string;
   meetingUrl: string;
+  conversationId: string | null;
   startedAt: number;
   transcript: TranscriptLine[];
   participants: Map<string, string>;
@@ -37,10 +38,15 @@ const MAX_TRANSCRIPT_LINES = 5_000;
 
 const sessions = new Map<string, MeetingSession>();
 
-export function openSession(botId: string, meetingUrl: string): MeetingSession {
+export function openSession(
+  botId: string,
+  meetingUrl: string,
+  conversationId: string | null = null,
+): MeetingSession {
   const session: MeetingSession = {
     botId,
     meetingUrl,
+    conversationId,
     startedAt: Date.now(),
     transcript: [],
     participants: new Map(),

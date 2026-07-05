@@ -16,6 +16,22 @@ export function setResolvedConfig(config: MeetingBotConfig): void {
 }
 
 /**
+ * The assistant's display name, resolved from `IDENTITY.md` by the `init` hook.
+ * Used as the default bot name when the user does not supply one, so the bot
+ * joins the meeting as the assistant rather than Recall's generic
+ * "Meeting Notetaker".
+ */
+let assistantName: string | null = null;
+
+export function setAssistantName(name: string | null): void {
+  assistantName = name;
+}
+
+export function getAssistantName(): string | null {
+  return assistantName;
+}
+
+/**
  * Read the resolved config. Throws if the plugin has not initialized yet — a
  * tool cannot create a bot before `init` has validated credentials and started
  * the realtime receiver.
