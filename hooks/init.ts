@@ -3,18 +3,18 @@
  *
  * Runs once when the daemon loads the plugin. Its job is to make the plugin
  * ready to send bots: validate the operator config, stash it for the tools,
- * and stand up the realtime WebSocket server that Recall will dial back into
- * for live transcript and participant events.
+ * and spawn the realtime WebSocket server subprocess that Recall will dial
+ * back into for live transcript and participant events.
  *
- * The realtime server is a long-lived, per-plugin listener (not per-meeting):
- * one socket endpoint fields every concurrent bot's stream. Standing it up here
- * — rather than lazily on first join — means it is reachable at the stable
- * public URL before any bot is created, which is what Recall requires.
+ * The realtime server runs in its own OS process so that a flood of realtime
+ * frames cannot block the daemon's event loop. It is spawned here, in `init`,
+ * rather than lazily on first join, so it is reachable at the stable public URL
+ * before any bot is created, which is what Recall requires.
  *
- * Init is intentionally non-fatal on a server bind failure: it logs and returns
- * so the plugin still loads (tools will report the receiver is down). A missing
- * or invalid config, however, throws — the plugin cannot function without an
- * API key and a callback URL.
+ * Init is intentionally non-fatal on a server spawn failure: it logs and
+ * returns so the plugin still loads (tools will report the receiver is down).
+ * A missing or invalid config, however, throws — the plugin cannot function
+ * without an API key and a callback URL.
  */
 
 import type { InitContext } from "@vellumai/plugin-api";
@@ -52,7 +52,7 @@ const init = async (ctx: InitContext): Promise<void> => {
   }
 
   try {
-    startRealtimeServer(config, ctx.logger);
+    await startRealtimeServer(config, ctx.logger);
     ctx.logger.info(
       {
         region: config.region,
