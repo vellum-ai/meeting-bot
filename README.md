@@ -21,10 +21,10 @@ before any bot is created.
 
 That maps cleanly onto the plugin lifecycle hooks:
 
-| Hook       | Responsibility                                                        |
-| ---------- | --------------------------------------------------------------------- |
-| `init`     | Validate config, start the realtime WebSocket server (one per plugin) |
-| `shutdown` | Stop the realtime server and drop all Recall connections              |
+| Hook       | Responsibility                                                                |
+| ---------- | ----------------------------------------------------------------------------- |
+| `init`     | Validate config, spawn the realtime WebSocket server subprocess               |
+| `shutdown` | Stop the realtime subprocess and drop all Recall connections                  |
 
 ```
                         create bot (REST, POST /api/v1/bot/)
@@ -35,13 +35,24 @@ That maps cleanly onto the plugin lifecycle hooks:
                                                                 └────┬─────┘
         realtime WebSocket (Recall dials IN to publicWsUrl)          │
    ┌──────────────────────────────┐   ◀───────────────────────────────
-   │ realtime server (init hook)  │      transcript.data,
-   │  → session store             │      participant_events.*, …
+   │ realtime subprocess          │      transcript.data,
+   │  (own OS process, spawned    │      participant_events.*, …
+   │   from init hook)            │
+   │  → JSON-lines over stdio     │
+   └──────────┬───────────────────┘
+              │ event frames
+   ┌──────────▼───────────────────┐
+   │ daemon (session store)       │
+   │  → tools read transcript     │
    └──────────────────────────────┘
 ```
 
-The realtime server is a process-wide singleton and outlives individual
-meetings — one listener demultiplexes every concurrent bot by bot id.
+The realtime server runs in its own OS process, spawned by the `init` hook and
+supervised by the plugin. Events flow from Recall into the subprocess over
+WebSocket, then as JSON-lines over stdio to the daemon, where they are routed
+to the in-memory session store that tools read. This isolates the
+connection-handling hot path from the daemon's event loop. The subprocess is
+visible in the assistant's process tree (`assistant ps`).
 
 ## Tools
 

@@ -1,37 +1,36 @@
 /**
- * Realtime receiver — the WebSocket server Recall dials back into.
+ * Realtime receiver manager — spawns and supervises the WebSocket server
+ * subprocess that Recall dials back into.
  *
- * ## Why this is a server the plugin hosts (not a client it opens)
+ * ## Why a subprocess
  *
- * Recall's realtime model is inverted from a typical webhook client: when a bot
- * is created with a `websocket` realtime endpoint, Recall opens an *outbound*
- * connection *to a URL the integration exposes* and streams in-call events
- * (transcript utterances, participant joins/leaves, optionally audio/video
- * buffers) over it. So the integration must be listening at a stable, public
- * `wss://` address before any bot is created.
+ * The realtime WebSocket listener runs in its own OS process, spawned by the
+ * plugin's `init` hook. This isolates the connection-handling and frame-parsing
+ * hot path from the daemon's event loop: a flood of realtime frames cannot
+ * block LLM calls or tool execution, and the server has its own crash/restart
+ * boundary. It also makes the server visible in the assistant's process tree
+ * (`assistant ps` shows it as a child of the daemon).
  *
- * That lifecycle is exactly what the `init` / `shutdown` plugin hooks are for:
- * `init` starts this server once at plugin bootstrap; `shutdown` stops it on
- * teardown. The server outlives individual meetings — one listener fields the
- * realtime streams of every concurrent bot, demultiplexed by bot id inside the
- * event payloads.
+ * ## Protocol
  *
- * ## Connection handling
+ * The subprocess communicates with the parent over stdio:
  *
- *   - Verification: when a `verificationToken` is configured, the inbound
- *     connection's `?token=` query parameter must match, else the upgrade is
- *     rejected with 401. (Recall also supports signed-header verification; the
- *     token approach is the simpler default this scaffold ships.)
- *   - Keep-alive: Recall notes that idle proxies may drop the socket, so the
- *     server pings every open connection on a fixed interval.
- *   - Dispatch: each JSON frame is parsed against the realtime envelope and
- *     routed to the session store via the normalized extractors.
+ *   stdout: JSON-lines, one object per line. See {@link SubprocessMessage}.
+ *   stdin:  The parent writes "stop\n" to request graceful shutdown. When
+ *           stdin closes (parent died), the subprocess self-terminates.
  *
- * The server is a process-wide singleton: `startRealtimeServer` is idempotent
- * and `stopRealtimeServer` is safe to call when nothing is running.
+ * The parent reads stdout line-by-line: a `ready` message marks the server as
+ * listening; `event` messages are dispatched to the session store; `log`
+ * messages are forwarded to the plugin logger.
+ *
+ * ## Lifecycle
+ *
+ * `startRealtimeServer` spawns the subprocess and waits for the `ready` signal
+ * (with a timeout). `stopRealtimeServer` sends the stop command, waits for
+ * exit, and falls back to SIGTERM/SIGKILL if the child does not exit cleanly.
  */
 
-import type { Server, ServerWebSocket } from "bun";
+import { spawn, type ChildProcess } from "node:child_process";
 
 import type { MeetingBotConfig } from "./config.ts";
 import {
@@ -52,150 +51,286 @@ export interface Logger {
   debug(obj: Record<string, unknown>, msg?: string): void;
 }
 
-interface SocketData {
-  remote: string;
+/** Messages the subprocess emits on stdout, parsed by the parent. */
+interface SubprocessMessage {
+  type: "ready" | "connection" | "event" | "log";
+  address?: string;
+  remote?: string;
+  action?: string;
+  code?: number;
+  event?: string;
+  data?: Record<string, unknown>;
+  level?: string;
+  msg?: string;
 }
 
-const KEEPALIVE_INTERVAL_MS = 30_000;
+/** Time to wait for the subprocess to signal readiness. */
+const READY_TIMEOUT_MS = 10_000;
+/** Time to wait for graceful shutdown before SIGTERM. */
+const STOP_GRACE_MS = 5_000;
+/** Time to wait after SIGTERM before SIGKILL. */
+const KILL_GRACE_MS = 3_000;
 
 interface RunningServer {
-  server: Server;
-  sockets: Set<ServerWebSocket<SocketData>>;
-  keepAlive: ReturnType<typeof setInterval>;
+  child: ChildProcess;
+  address: string;
   logger: Logger;
+  stdoutBuffer: string;
+  stderrBuffer: string;
+  ready: boolean;
 }
 
 let running: RunningServer | null = null;
 
-/** True when the realtime server is currently listening. */
+/** True when the realtime server subprocess is running. */
 export function isRealtimeServerRunning(): boolean {
-  return running !== null;
+  return running !== null && running.ready;
 }
 
 /** The address the server is bound to, for diagnostics. */
 export function realtimeServerAddress(): string | null {
   if (!running) return null;
-  return `${running.server.hostname}:${running.server.port}`;
+  return running.address;
 }
 
 /**
- * Start the realtime WebSocket server. Idempotent: a second call while already
- * running is a no-op that logs and returns.
+ * Spawn the realtime WebSocket server as a subprocess. Returns a promise that
+ * resolves when the subprocess signals readiness (or rejects on timeout /
+ * spawn failure). Idempotent: a second call while already running is a no-op.
  */
 export function startRealtimeServer(
   config: MeetingBotConfig,
   logger: Logger,
-): void {
+): Promise<void> {
   if (running) {
     logger.warn(
       { address: realtimeServerAddress() },
       "meeting-bot: realtime server already running",
     );
-    return;
+    return Promise.resolve();
   }
 
-  const sockets = new Set<ServerWebSocket<SocketData>>();
-  const expectedToken = config.verificationToken;
+  return new Promise<void>((resolve, reject) => {
+    // Pass the config as base64-encoded JSON in argv to avoid env-var size
+    // limits and keep the command line readable.
+    const configArg = Buffer.from(
+      JSON.stringify(config),
+      "utf-8",
+    ).toString("base64");
 
-  const server = Bun.serve<SocketData, undefined>({
-    hostname: config.listenHost,
-    port: config.listenPort,
-    fetch(req, srv) {
-      const url = new URL(req.url);
+    // Resolve the subprocess script path relative to this module.
+    const scriptPath = new URL("./realtime-subprocess.ts", import.meta.url)
+      .pathname;
 
-      // A plain GET at the root doubles as a health check for tunnels/probes.
-      if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-        return new Response("meeting-bot realtime receiver: ok", {
-          status: 200,
-        });
+    const child = spawn(
+      process.execPath,
+      [scriptPath, configArg],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env },
+      },
+    );
+
+    const state: RunningServer = {
+      child,
+      address: "",
+      logger,
+      stdoutBuffer: "",
+      stderrBuffer: "",
+      ready: false,
+    };
+
+    const readyTimer = setTimeout(() => {
+      if (!state.ready) {
+        logger.error(
+          { timeoutMs: READY_TIMEOUT_MS },
+          "meeting-bot: realtime subprocess did not signal readiness in time",
+        );
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // best-effort
+        }
+        running = null;
+        reject(
+          new Error(
+            `realtime subprocess did not become ready within ${READY_TIMEOUT_MS}ms`,
+          ),
+        );
       }
+    }, READY_TIMEOUT_MS);
+    if (typeof readyTimer.unref === "function") readyTimer.unref();
 
-      if (expectedToken) {
-        const presented = url.searchParams.get("token");
-        if (presented !== expectedToken) {
-          logger.warn(
-            { remote: clientAddr(req, srv) },
-            "meeting-bot: rejecting realtime connection — token mismatch",
-          );
-          return new Response("unauthorized", { status: 401 });
+    child.stdout?.setEncoding("utf-8");
+    child.stdout?.on("data", (chunk: string) => {
+      state.stdoutBuffer += chunk;
+      let newlineIdx: number;
+      while ((newlineIdx = state.stdoutBuffer.indexOf("\n")) !== -1) {
+        const line = state.stdoutBuffer.slice(0, newlineIdx).trim();
+        state.stdoutBuffer = state.stdoutBuffer.slice(newlineIdx + 1);
+        if (line) handleSubprocessLine(line, state, readyTimer, resolve);
+      }
+    });
+
+    child.stderr?.setEncoding("utf-8");
+    child.stderr?.on("data", (chunk: string) => {
+      state.stderrBuffer += chunk;
+      let newlineIdx: number;
+      while ((newlineIdx = state.stderrBuffer.indexOf("\n")) !== -1) {
+        const line = state.stderrBuffer.slice(0, newlineIdx).trim();
+        state.stderrBuffer = state.stderrBuffer.slice(newlineIdx + 1);
+        if (line) {
+          logger.warn({ stderr: line }, `meeting-bot: realtime subprocess stderr: ${line}`);
         }
       }
+    });
 
-      const ok = srv.upgrade(req, { data: { remote: clientAddr(req, srv) } });
-      if (ok) return undefined;
-      return new Response("websocket upgrade failed", { status: 400 });
-    },
-    websocket: {
-      open(ws) {
-        sockets.add(ws);
-        logger.info({ remote: ws.data.remote }, "meeting-bot: realtime connection open");
-      },
-      message(ws, raw) {
-        handleFrame(raw, logger);
-      },
-      close(ws, code, reason) {
-        sockets.delete(ws);
-        logger.info(
-          { remote: ws.data.remote, code, reason },
-          "meeting-bot: realtime connection closed",
+    child.on("exit", (code, signal) => {
+      clearTimeout(readyTimer);
+      if (!state.ready) {
+        running = null;
+        reject(
+          new Error(
+            `realtime subprocess exited before readiness (code=${code}, signal=${signal})`,
+          ),
         );
-      },
-    },
-  });
-
-  // Recall keeps the connection persistent; ping periodically so an idle
-  // reverse proxy does not silently drop it.
-  const keepAlive = setInterval(() => {
-    for (const ws of sockets) {
-      try {
-        ws.ping();
-      } catch {
-        // Socket already gone; the close handler will prune it.
+      } else if (running === state) {
+        logger.info(
+          { code, signal },
+          "meeting-bot: realtime subprocess exited",
+        );
+        running = null;
       }
-    }
-  }, KEEPALIVE_INTERVAL_MS);
-  // Do not let the keep-alive timer hold the process open on its own.
-  if (typeof keepAlive.unref === "function") keepAlive.unref();
+    });
 
-  running = { server, sockets, keepAlive, logger };
-  logger.info(
-    { address: `${server.hostname}:${server.port}` },
-    "meeting-bot: realtime server started",
-  );
+    child.on("error", (err) => {
+      clearTimeout(readyTimer);
+      running = null;
+      reject(new Error(`realtime subprocess spawn error: ${String(err)}`));
+    });
+
+    running = state;
+  });
 }
 
-/** Stop the realtime server and drop all connections. Safe when not running. */
-export function stopRealtimeServer(): void {
+/**
+ * Stop the realtime server subprocess. Sends "stop" on stdin, waits for
+ * graceful exit, then escalates to SIGTERM and SIGKILL. Safe when not running.
+ */
+export async function stopRealtimeServer(): Promise<void> {
   if (!running) return;
-  const { server, sockets, keepAlive, logger } = running;
+  const { child, logger } = running;
 
-  clearInterval(keepAlive);
-  for (const ws of sockets) {
+  // Try graceful shutdown via stdin.
+  try {
+    child.stdin?.write("stop\n");
+    child.stdin?.end();
+  } catch {
+    // stdin might already be closed
+  }
+
+  // Wait for exit, escalating to SIGTERM then SIGKILL.
+  const exited = await waitForExit(child, STOP_GRACE_MS);
+  if (!exited) {
+    logger.warn({}, "meeting-bot: realtime subprocess did not exit gracefully, sending SIGTERM");
     try {
-      ws.close(1001, "server shutting down");
+      child.kill("SIGTERM");
     } catch {
-      // best-effort
+      // already dead
+    }
+    const terminated = await waitForExit(child, KILL_GRACE_MS);
+    if (!terminated) {
+      logger.warn({}, "meeting-bot: realtime subprocess did not respond to SIGTERM, sending SIGKILL");
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already dead
+      }
     }
   }
-  sockets.clear();
-  server.stop(true);
+
   running = null;
   logger.info({}, "meeting-bot: realtime server stopped");
 }
 
-/** Parse one inbound frame and route it to the session store. */
-function handleFrame(raw: string | Buffer, logger: Logger): void {
-  let json: unknown;
+/** Wait for the child to exit, resolving true if it exits within the timeout. */
+function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}
+
+/** Parse one stdout line from the subprocess and dispatch it. */
+function handleSubprocessLine(
+  line: string,
+  state: RunningServer,
+  readyTimer: ReturnType<typeof setTimeout>,
+  resolve: () => void,
+): void {
+  let msg: SubprocessMessage;
   try {
-    json = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf-8"));
+    msg = JSON.parse(line);
   } catch {
-    logger.warn({}, "meeting-bot: dropping non-JSON realtime frame");
+    state.logger.warn({ line }, "meeting-bot: dropping unparseable subprocess stdout line");
     return;
   }
 
-  const parsed = RealtimeMessageSchema.safeParse(json);
+  switch (msg.type) {
+    case "ready": {
+      state.ready = true;
+      state.address = msg.address ?? "unknown";
+      clearTimeout(readyTimer);
+      state.logger.info(
+        { address: state.address },
+        "meeting-bot: realtime server subprocess is listening",
+      );
+      resolve();
+      break;
+    }
+
+    case "connection": {
+      state.logger.info(
+        { remote: msg.remote, action: msg.action, code: msg.code },
+        `meeting-bot: realtime connection ${msg.action}`,
+      );
+      break;
+    }
+
+    case "event": {
+      dispatchEvent(msg.event ?? "", msg.data ?? {}, state.logger);
+      break;
+    }
+
+    case "log": {
+      const level = msg.level ?? "info";
+      const logFn = level === "error"
+        ? state.logger.error
+        : level === "warn"
+          ? state.logger.warn
+          : state.logger.info;
+      logFn.call(state.logger, {}, `meeting-bot: ${msg.msg ?? ""}`);
+      break;
+    }
+
+    default: {
+      state.logger.debug({ msg }, "meeting-bot: unrecognized subprocess message type");
+    }
+  }
+}
+
+/** Route a realtime event to the session store. */
+function dispatchEvent(
+  eventName: string,
+  data: Record<string, unknown>,
+  logger: Logger,
+): void {
+  const parsed = RealtimeMessageSchema.safeParse({ event: eventName, data });
   if (!parsed.success) {
-    logger.warn({}, "meeting-bot: dropping malformed realtime message");
+    logger.warn({ event: eventName }, "meeting-bot: dropping malformed realtime event from subprocess");
     return;
   }
 
@@ -208,17 +343,10 @@ function handleFrame(raw: string | Buffer, logger: Logger): void {
   }
 
   if (msg.event.startsWith("participant_events.")) {
-    const event = extractParticipantEvent(msg);
-    if (event) recordParticipantEvent(event);
+    const participantEvent = extractParticipantEvent(msg);
+    if (participantEvent) recordParticipantEvent(participantEvent);
     return;
   }
 
-  // Unrecognized (e.g. audio/video buffer events) — ignore for the scaffold.
   logger.debug({ event: msg.event }, "meeting-bot: unhandled realtime event");
-}
-
-function clientAddr(req: Request, srv: Server): string {
-  const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  return srv.requestIP(req)?.address ?? "unknown";
 }
