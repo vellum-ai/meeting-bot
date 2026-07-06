@@ -24,7 +24,6 @@ import { openSession } from "../src/session-store.ts";
 
 interface JoinParams {
   meeting_url: string;
-  bot_name?: string;
 }
 
 export const meetingBotJoin: ToolDefinition = {
@@ -41,11 +40,7 @@ export const meetingBotJoin: ToolDefinition = {
         description:
           "The full meeting URL to join (e.g. https://meet.google.com/abc-defg-hij).",
       },
-      bot_name: {
-        type: "string",
-        description:
-          "Optional display name for the bot in the meeting. Defaults to the assistant's name.",
-      },
+
     },
     required: ["meeting_url"],
   },
@@ -76,10 +71,10 @@ export const meetingBotJoin: ToolDefinition = {
       };
     }
 
-    // Use the user-supplied name, falling back to the assistant's display name
-    // (resolved from IDENTITY.md at init). When neither is available, omit the
-    // field entirely so Recall uses its workspace default.
-    const botName = params.bot_name?.trim() || getAssistantName() || undefined;
+    // The bot name always comes from the assistant's identity (resolved from
+    // IDENTITY.md at init). The tool does not accept a name override so the
+    // assistant cannot spoof a different display name.
+    const botName = getAssistantName() ?? undefined;
 
     try {
       const bot = await createBot(config, meetingUrl, {
