@@ -12,12 +12,13 @@
 
 import {
   RiskLevel,
+  type ToolContext,
   type ToolDefinition,
   type ToolExecutionResult,
 } from "@vellumai/plugin-api";
 
 import { createBot, RecallApiError } from "../src/recall-client.ts";
-import { requireConfig } from "../src/plugin-state.ts";
+import { getAssistantName, requireConfig } from "../src/plugin-state.ts";
 import { isRealtimeServerRunning } from "../src/realtime-server.ts";
 import { openSession } from "../src/session-store.ts";
 
@@ -43,14 +44,17 @@ export const meetingBotJoin: ToolDefinition = {
       bot_name: {
         type: "string",
         description:
-          "Optional display name for the bot in the meeting. Defaults to the Recall workspace default.",
+          "Optional display name for the bot in the meeting. Defaults to the assistant's name.",
       },
     },
     required: ["meeting_url"],
   },
   defaultRiskLevel: RiskLevel.Medium,
 
-  async execute(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+  async execute(
+    input: Record<string, unknown>,
+    ctx?: ToolContext,
+  ): Promise<ToolExecutionResult> {
     const params = input as unknown as JoinParams;
     const meetingUrl = params.meeting_url?.trim();
     if (!meetingUrl) {
@@ -72,11 +76,16 @@ export const meetingBotJoin: ToolDefinition = {
       };
     }
 
+    // Use the user-supplied name, falling back to the assistant's display name
+    // (resolved from IDENTITY.md at init). When neither is available, omit the
+    // field entirely so Recall uses its workspace default.
+    const botName = params.bot_name?.trim() || getAssistantName() || undefined;
+
     try {
       const bot = await createBot(config, meetingUrl, {
-        botName: params.bot_name,
+        botName,
       });
-      openSession(bot.id, meetingUrl);
+      openSession(bot.id, meetingUrl, ctx?.conversationId ?? null);
 
       return {
         content:
