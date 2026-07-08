@@ -32,6 +32,8 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 
+import { getConfiguredProvider, type Message } from "@vellumai/plugin-api";
+
 import type { MeetingBotConfig } from "./config.ts";
 import {
   RealtimeMessageSchema,
@@ -419,9 +421,15 @@ function bufferTranscript(
 }
 
 /**
- * Flush the buffered transcript for a session to the conversation via the
- * daemon's HTTP API (`POST /v1/messages`). Errors are logged but never thrown
- * — a failed flush must not crash the realtime receiver.
+ * Flush the buffered transcript for a session by running the agent loop
+ * directly via the configured provider. Instead of POSTing to the daemon's
+ * HTTP API (which requires auth and creates a user-visible message), this
+ * calls `getConfiguredProvider("mainAgent")` to get the provider and
+ * `provider.sendMessage()` to run a single LLM turn with the transcript
+ * content as the user message.
+ *
+ * Errors are logged but never thrown — a failed flush must not crash the
+ * realtime receiver.
  */
 async function flushTranscriptBuffer(botId: string, logger: Logger): Promise<void> {
   const state = transcriptBuffers.get(botId);
@@ -445,30 +453,42 @@ async function flushTranscriptBuffer(botId: string, logger: Logger): Promise<voi
     `Live transcript from meeting ${session.meetingUrl}:\n` +
     lines.map((l) => `[${l.speaker}]: ${l.text}`).join("\n");
 
-  const port = process.env.RUNTIME_HTTP_PORT ?? "7821";
-  const url = `http://localhost:${port}/v1/messages`;
-
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId: session.conversationId,
-        content,
-        automated: true,
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
+    const provider = await getConfiguredProvider("mainAgent");
+    if (!provider) {
       logger.warn(
-        { status: res.status, body: body.slice(0, 200), botId },
-        "meeting-bot: transcript flush to conversation returned non-OK status",
+        { botId },
+        "meeting-bot: no configured provider available — transcript flush skipped",
       );
+      return;
     }
+
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: content }],
+      },
+    ];
+
+    const response = await provider.sendMessage(messages, {
+      systemPrompt:
+        "You are a meeting note-taker. The user message contains a live transcript excerpt from an ongoing meeting. " +
+        "Summarize key points, action items, and decisions. Be concise. If the transcript is incomplete or partial, " +
+        "note that and provide what you can.",
+    });
+
+    logger.info(
+      {
+        botId,
+        stopReason: response.stopReason,
+        outputTokens: response.usage.outputTokens,
+      },
+      "meeting-bot: transcript flush — provider turn complete",
+    );
   } catch (err) {
     logger.warn(
       { error: String(err).slice(0, 200), botId },
-      "meeting-bot: transcript flush to conversation failed (non-fatal)",
+      "meeting-bot: transcript flush failed (non-fatal)",
     );
   }
 }
