@@ -21,6 +21,7 @@ import {
   resolveApiKey,
   type MeetingBotConfig,
 } from "./config.ts";
+import { SILENT_MP3_B64 } from "./silent-mp3.ts";
 
 /** Minimal shape of a Recall bot as returned by the Bot API. */
 export interface RecallBot {
@@ -98,6 +99,16 @@ export async function createBot(
   const body: Record<string, unknown> = {
     meeting_url: meetingUrl,
     recording_config: buildRecordingConfig(config),
+    // Unlock the on-demand output_audio endpoint by providing a silent
+    // placeholder. The real audio is sent later via outputAudio().
+    automatic_audio_output: {
+      in_call_recording: {
+        data: {
+          kind: "mp3",
+          b64_data: SILENT_MP3_B64,
+        },
+      },
+    },
   };
   if (opts.botName) body.bot_name = opts.botName;
   if (opts.metadata) body.metadata = opts.metadata;
@@ -156,4 +167,35 @@ export async function getBot(
     throw new RecallApiError(`get bot failed (${res.status})`, res.status, text);
   }
   return JSON.parse(text) as RecallBot;
+}
+
+/**
+ * Send audio to a bot for playback in the live meeting. The bot must have been
+ * created with `automatic_audio_output` enabled (which {@link createBot} does
+ * automatically with a silent placeholder).
+ *
+ * @param botId   The Recall bot id.
+ * @param mp3B64  Base64-encoded MP3 audio data (standard alphabet, not URL-safe).
+ */
+export async function outputAudio(
+  config: MeetingBotConfig,
+  botId: string,
+  mp3B64: string,
+): Promise<void> {
+  const res = await fetch(
+    `${recallApiBase(config.region)}bot/${encodeURIComponent(botId)}/output_audio/`,
+    {
+      method: "POST",
+      headers: authHeaders(resolveApiKey(config)),
+      body: JSON.stringify({ kind: "mp3", b64_data: mp3B64 }),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new RecallApiError(
+      `output audio failed (${res.status})`,
+      res.status,
+      text,
+    );
+  }
 }
