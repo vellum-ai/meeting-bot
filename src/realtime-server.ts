@@ -32,7 +32,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 
-import { getConfiguredProvider, type Message } from "@vellumai/plugin-api";
+import { getConfiguredProvider, synthesizeSpeech, type Message } from "@vellumai/plugin-api";
 
 import type { MeetingBotConfig } from "./config.ts";
 import {
@@ -48,7 +48,6 @@ import {
   recordParticipantEvent,
   recordUtterance,
 } from "./session-store.ts";
-import { synthesizeSpeech } from "./tts.ts";
 
 /** Minimal logger surface (matches the host's PluginLogger shape). */
 export interface Logger {
@@ -507,10 +506,12 @@ async function flushTranscriptBuffer(
       return;
     }
 
-    // Synthesize the response text to speech via the daemon's TTS endpoint.
+    // Synthesize the response text to speech via the plugin-api TTS handle.
+    // This uses the assistant's globally configured TTS provider.
     let mp3B64: string;
     try {
-      mp3B64 = await synthesizeSpeech(responseText, config);
+      const ttsResult = await synthesizeSpeech({ text: responseText });
+      mp3B64 = ttsResult.audioBase64;
     } catch (err) {
       logger.warn(
         { error: String(err).slice(0, 200), botId },

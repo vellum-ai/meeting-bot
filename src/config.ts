@@ -138,26 +138,6 @@ export const MeetingBotConfigSchema = z
         languageCode: "en",
         mode: "prioritize_low_latency",
       }),
-    tts: z
-      .object({
-        endpoint: z
-          .string()
-          .url()
-          .optional()
-          .describe(
-            "Override the TTS synthesis endpoint. Defaults to the daemon's internal HTTP endpoint derived from RUNTIME_HTTP_PORT (or http://127.0.0.1:7821).",
-          ),
-        authToken: z
-          .string()
-          .optional()
-          .describe(
-            "Bearer token for the TTS endpoint when HTTP auth is enabled. Not needed when DISABLE_HTTP_AUTH is set (dev / QA).",
-          ),
-      })
-      .optional()
-      .describe(
-        "Text-to-speech configuration for voice responses. When omitted, the plugin uses the daemon's internal TTS endpoint without auth.",
-      ),
   })
   .describe(
     "Recall.ai meeting-bot configuration — the API-key credential name, region, the realtime WebSocket callback URL, and transcription settings.",
