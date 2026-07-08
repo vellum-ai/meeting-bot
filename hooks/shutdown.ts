@@ -13,10 +13,22 @@
 
 import type { ShutdownContext } from "@vellumai/plugin-api";
 
+import { teardownInbound } from "../src/inbound.ts";
+import type { Logger } from "../src/realtime-server.ts";
 import { stopRealtimeServer } from "../src/realtime-server.ts";
+
+const noopLogger: Logger = {
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  debug: () => {},
+};
 
 const shutdown = async (_ctx: ShutdownContext): Promise<void> => {
   await stopRealtimeServer();
+  // ShutdownContext does not carry a logger, so use a noop logger for
+  // tunnel teardown — the tunnel process is being killed anyway.
+  await teardownInbound(noopLogger);
 };
 
 export default shutdown;

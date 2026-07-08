@@ -85,8 +85,9 @@ export const MeetingBotConfigSchema = z
     publicWsUrl: z
       .string()
       .url()
+      .optional()
       .describe(
-        "Stable public base URL (ws:// or wss://) Recall dials back into for realtime events. Maps to the plugin's realtime server via a tunnel or ingress. Example: wss://your-app.ngrok.app",
+        "Stable public base URL (ws:// or wss://) Recall dials back into for realtime events. Maps to the plugin's realtime server via a tunnel or ingress. Example: wss://your-app.ngrok.app. When omitted, the plugin auto-provisions a Cloudflare Tunnel at init time (see src/inbound.ts).",
       ),
     listenHost: z
       .string()
@@ -175,9 +176,14 @@ export function resolveConfig(raw: unknown): ConfigResolution {
       "verificationToken is empty — inbound realtime connections will not be authenticated. Set one outside local development.",
     );
   }
-  if (config.publicWsUrl.startsWith("ws://")) {
+  if (config.publicWsUrl?.startsWith("ws://")) {
     warnings.push(
       "publicWsUrl uses insecure ws://. Recall recommends wss:// for anything beyond local development.",
+    );
+  }
+  if (!config.publicWsUrl) {
+    warnings.push(
+      "publicWsUrl is not set — the plugin will auto-provision a Cloudflare Tunnel at init time. This is insecure and intended for development only. Set publicWsUrl explicitly for production deployments.",
     );
   }
 
@@ -234,6 +240,11 @@ export function resolveApiKey(config: MeetingBotConfig): string {
  * normalized trailing slash.
  */
 export function realtimeEndpointUrl(config: MeetingBotConfig): string {
+  if (!config.publicWsUrl) {
+    throw new Error(
+      "meeting-bot: publicWsUrl is not set. The init hook should have provisioned a tunnel — this likely means setupInbound failed or was skipped.",
+    );
+  }
   const base = config.publicWsUrl.replace(/\/+$/, "");
   const withSlash = `${base}/`;
   if (!config.verificationToken) return withSlash;

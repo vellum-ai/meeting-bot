@@ -26,11 +26,12 @@ import {
   resolveConfig,
 } from "../src/config.ts";
 import { resolveAssistantName } from "../src/identity.ts";
+import { setupInbound } from "../src/inbound.ts";
 import { setAssistantName, setResolvedConfig } from "../src/plugin-state.ts";
 import { startRealtimeServer } from "../src/realtime-server.ts";
 
 const init = async (ctx: InitContext): Promise<void> => {
-  const { config, warnings } = resolveConfig(ctx.config);
+  let { config, warnings } = resolveConfig(ctx.config);
   for (const w of warnings) {
     ctx.logger.warn({ warning: w }, `meeting-bot config: ${w}`);
   }
@@ -72,10 +73,37 @@ const init = async (ctx: InitContext): Promise<void> => {
 
   try {
     await startRealtimeServer(config, ctx.logger);
+
+    // If the operator did not supply a publicWsUrl, auto-provision a
+    // Cloudflare Tunnel so Recall can reach the realtime server. This is
+    // a temporary, insecure measure — see src/inbound.ts for details.
+    if (!config.publicWsUrl) {
+      ctx.logger.info(
+        {},
+        "meeting-bot: no publicWsUrl configured — auto-provisioning Cloudflare Tunnel",
+      );
+      try {
+        const result = await setupInbound(config.listenPort, ctx.logger);
+        config = { ...config, publicWsUrl: result.publicWsUrl };
+        setResolvedConfig(config);
+        ctx.logger.info(
+          { publicWsUrl: result.publicWsUrl },
+          "meeting-bot: auto-provisioned tunnel URL",
+        );
+      } catch (err) {
+        ctx.logger.error(
+          { error: String(err).slice(0, 300) },
+          "meeting-bot: failed to auto-provision tunnel — bots cannot be created without a publicWsUrl. Set one in config.json or install cloudflared.",
+        );
+      }
+    }
+
     ctx.logger.info(
       {
         region: config.region,
-        endpoint: realtimeEndpointUrl(config),
+        endpoint: config.publicWsUrl
+          ? realtimeEndpointUrl(config)
+          : "(tunnel not established)",
         events: config.events,
       },
       "meeting-bot: initialized — realtime receiver is listening for Recall connections",
