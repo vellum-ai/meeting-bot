@@ -32,7 +32,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 
-import { getConfiguredProvider, synthesizeSpeech, type Message } from "@vellumai/plugin-api";
+import { getConfiguredProvider, sanitizeForTts, synthesizeText, type Message } from "@vellumai/plugin-api";
 
 import type { MeetingBotConfig } from "./config.ts";
 import {
@@ -506,12 +506,22 @@ async function flushTranscriptBuffer(
       return;
     }
 
-    // Synthesize the response text to speech via the plugin-api TTS handle.
-    // This uses the assistant's globally configured TTS provider.
+    // Sanitize the response text (strip markdown, URLs, emoji) and synthesize
+    // to speech via the plugin-api TTS handle, which uses the assistant's
+    // globally configured TTS provider.
+    const sanitized = sanitizeForTts(responseText).trim();
+    if (!sanitized) {
+      logger.debug({ botId }, "meeting-bot: response text is empty after sanitization — skipping voice output");
+      return;
+    }
+
     let mp3B64: string;
     try {
-      const ttsResult = await synthesizeSpeech({ text: responseText });
-      mp3B64 = ttsResult.audioBase64;
+      const ttsResult = await synthesizeText({
+        text: sanitized,
+        useCase: "message-playback",
+      });
+      mp3B64 = ttsResult.audio.toString("base64");
     } catch (err) {
       logger.warn(
         { error: String(err).slice(0, 200), botId },
