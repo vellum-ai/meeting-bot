@@ -32,7 +32,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 
-import { getConfiguredProvider, type Message } from "@vellumai/plugin-api";
+import { getConfiguredProvider, synthesizeText, type Message } from "@vellumai/plugin-api";
 
 import type { MeetingBotConfig } from "./config.ts";
 import {
@@ -41,6 +41,7 @@ import {
   extractUtterance,
   type NormalizedUtterance,
 } from "./realtime-events.ts";
+import { outputAudio } from "./recall-client.ts";
 import {
   closeSession,
   getSession,
@@ -104,6 +105,7 @@ interface RunningServer {
   stdoutBuffer: string;
   stderrBuffer: string;
   ready: boolean;
+  config: MeetingBotConfig;
 }
 
 let running: RunningServer | null = null;
@@ -164,6 +166,7 @@ export function startRealtimeServer(
       stdoutBuffer: "",
       stderrBuffer: "",
       ready: false,
+      config,
     };
 
     const readyTimer = setTimeout(() => {
@@ -333,9 +336,9 @@ function handleSubprocessLine(
     }
 
     case "event": {
-      dispatchEvent(msg.event ?? "", msg.data ?? {}, state.logger);
-      break;
-    }
+        dispatchEvent(msg.event ?? "", msg.data ?? {}, state.logger, state.config);
+        break;
+      }
 
     case "log": {
       const level = msg.level ?? "info";
@@ -359,6 +362,7 @@ function dispatchEvent(
   eventName: string,
   data: Record<string, unknown>,
   logger: Logger,
+  config: MeetingBotConfig,
 ): void {
   const parsed = RealtimeMessageSchema.safeParse({ event: eventName, data });
   if (!parsed.success) {
@@ -378,7 +382,7 @@ function dispatchEvent(
       // Buffer finalized utterances and debounce a flush to the conversation.
       // Partials churn too fast and are not useful for LLM processing.
       if (!utterance.isPartial && utterance.botId) {
-        bufferTranscript(utterance.botId, utterance, logger);
+        bufferTranscript(utterance.botId, utterance, logger, config);
       }
     }
     return;
@@ -402,6 +406,7 @@ function bufferTranscript(
   botId: string,
   utterance: NormalizedUtterance,
   logger: Logger,
+  config: MeetingBotConfig,
 ): void {
   let state = transcriptBuffers.get(botId);
   if (!state) {
@@ -416,7 +421,7 @@ function bufferTranscript(
 
   if (state.timer) clearTimeout(state.timer);
   state.timer = setTimeout(() => {
-    void flushTranscriptBuffer(botId, logger);
+    void flushTranscriptBuffer(botId, logger, config);
   }, TRANSCRIPT_FLUSH_DEBOUNCE_MS);
 }
 
@@ -428,10 +433,18 @@ function bufferTranscript(
  * `provider.sendMessage()` to run a single LLM turn with the transcript
  * content as the user message.
  *
+ * After the provider responds, the response text is synthesized to speech
+ * via the daemon's TTS endpoint and sent to Recall's `output_audio` endpoint
+ * so the bot speaks the response into the live meeting.
+ *
  * Errors are logged but never thrown — a failed flush must not crash the
  * realtime receiver.
  */
-async function flushTranscriptBuffer(botId: string, logger: Logger): Promise<void> {
+async function flushTranscriptBuffer(
+  botId: string,
+  logger: Logger,
+  config: MeetingBotConfig,
+): Promise<void> {
   const state = transcriptBuffers.get(botId);
   if (!state) return;
 
@@ -472,9 +485,9 @@ async function flushTranscriptBuffer(botId: string, logger: Logger): Promise<voi
 
     const response = await provider.sendMessage(messages, {
       systemPrompt:
-        "You are a meeting note-taker. The user message contains a live transcript excerpt from an ongoing meeting. " +
-        "Summarize key points, action items, and decisions. Be concise. If the transcript is incomplete or partial, " +
-        "note that and provide what you can.",
+        "You are a meeting assistant participating in a live call. The user message contains a live transcript excerpt from an ongoing meeting. " +
+        "Respond concisely and naturally, as if speaking aloud. Summarize key points, note action items, and highlight decisions. " +
+        "Keep your response short (2-4 sentences) since it will be spoken as voice audio into the meeting.",
     });
 
     logger.info(
@@ -485,6 +498,45 @@ async function flushTranscriptBuffer(botId: string, logger: Logger): Promise<voi
       },
       "meeting-bot: transcript flush — provider turn complete",
     );
+
+    // Extract text from the provider response and speak it into the meeting.
+    const responseText = extractTextFromContent(response.content);
+    if (!responseText) {
+      logger.debug({ botId }, "meeting-bot: provider response has no text — skipping voice output");
+      return;
+    }
+
+    // Synthesize the response text to speech via the plugin-api TTS handle,
+    // which uses the assistant's globally configured TTS provider.
+    // Text is sanitized internally (markdown/URLs/emoji stripped).
+    let mp3B64: string;
+    try {
+      const ttsResult = await synthesizeText({
+        text: responseText,
+        useCase: "message-playback",
+      });
+      mp3B64 = ttsResult.audio.toString("base64");
+    } catch (err) {
+      logger.warn(
+        { error: String(err).slice(0, 200), botId },
+        "meeting-bot: TTS synthesis failed (non-fatal)",
+      );
+      return;
+    }
+
+    // Send the synthesized audio to Recall so the bot speaks it in the call.
+    try {
+      await outputAudio(config, botId, mp3B64);
+      logger.info(
+        { botId, textPreview: responseText.slice(0, 80) },
+        "meeting-bot: voice response sent to call",
+      );
+    } catch (err) {
+      logger.warn(
+        { error: String(err).slice(0, 200), botId },
+        "meeting-bot: output_audio failed (non-fatal)",
+      );
+    }
   } catch (err) {
     logger.warn(
       { error: String(err).slice(0, 200), botId },
@@ -503,4 +555,16 @@ export function clearTranscriptBuffer(botId: string): void {
   if (!state) return;
   if (state.timer) clearTimeout(state.timer);
   transcriptBuffers.delete(botId);
+}
+
+/**
+ * Extract concatenated text from a provider response's content blocks.
+ * Non-text blocks (images, tool use, etc.) are skipped.
+ */
+function extractTextFromContent(content: { type: string; text?: string }[]): string {
+  return content
+    .filter((block) => block.type === "text" && block.text)
+    .map((block) => block.text!)
+    .join(" ")
+    .trim();
 }
