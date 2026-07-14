@@ -32,7 +32,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 
-import { getConfiguredProvider, synthesizeText, type Message } from "@vellumai/plugin-api";
+import { runConversationTurn, synthesizeText, type ContentBlock } from "@vellumai/plugin-api";
 
 import type { MeetingBotConfig } from "./config.ts";
 import {
@@ -426,15 +426,14 @@ function bufferTranscript(
 }
 
 /**
- * Flush the buffered transcript for a session by running the agent loop
- * directly via the configured provider. Instead of POSTing to the daemon's
- * HTTP API (which requires auth and creates a user-visible message), this
- * calls `getConfiguredProvider("mainAgent")` to get the provider and
- * `provider.sendMessage()` to run a single LLM turn with the transcript
- * content as the user message.
+ * Flush the buffered transcript for a session by running a full conversation
+ * agent-loop turn via `runConversationTurn`. This reuses the assistant's
+ * conversation machinery (history, tools, compaction, system prompt from
+ * IDENTITY.md / SOUL.md, default-plugin injections) instead of a stateless
+ * one-shot LLM call.
  *
- * After the provider responds, the response text is synthesized to speech
- * via the daemon's TTS endpoint and sent to Recall's `output_audio` endpoint
+ * After the turn responds, the response text is synthesized to speech via
+ * the plugin-api TTS handle and sent to Recall's `output_audio` endpoint
  * so the bot speaks the response into the live meeting.
  *
  * Errors are logged but never thrown — a failed flush must not crash the
@@ -467,44 +466,33 @@ async function flushTranscriptBuffer(
     lines.map((l) => `[${l.speaker}]: ${l.text}`).join("\n");
 
   try {
-    const provider = await getConfiguredProvider("mainAgent");
-    if (!provider) {
-      logger.warn(
-        { botId },
-        "meeting-bot: no configured provider available — transcript flush skipped",
+    const result = await runConversationTurn({
+      conversationId: session.conversationId,
+      content: [{ type: "text", text: content }],
+    });
+
+    // If the turn was queued (conversation was busy), there's no response
+    // content to speak yet — it will be processed when the current turn
+    // finishes.
+    if (result.queued) {
+      logger.info(
+        { botId, conversationId: result.conversationId },
+        "meeting-bot: transcript flush queued — conversation was busy",
       );
       return;
     }
 
-    const messages: Message[] = [
-      {
-        role: "user",
-        content: [{ type: "text", text: content }],
-      },
-    ];
-
-    const response = await provider.sendMessage(messages, {
-      systemPrompt:
-        "You are a meeting assistant participating in a live call. The user message contains a live transcript excerpt from an ongoing meeting. " +
-        "Respond concisely and naturally, as if speaking aloud. Summarize key points, note action items, and highlight decisions. " +
-        "Keep your response short (2-4 sentences) since it will be spoken as voice audio into the meeting.",
-    });
-
-    logger.info(
-      {
-        botId,
-        stopReason: response.stopReason,
-        outputTokens: response.usage.outputTokens,
-      },
-      "meeting-bot: transcript flush — provider turn complete",
-    );
-
-    // Extract text from the provider response and speak it into the meeting.
-    const responseText = extractTextFromContent(response.content);
+    // Extract text from the assistant's content blocks for voice output.
+    const responseText = extractTextFromContent(result.content);
     if (!responseText) {
-      logger.debug({ botId }, "meeting-bot: provider response has no text — skipping voice output");
+      logger.debug({ botId }, "meeting-bot: assistant response has no text — skipping voice output");
       return;
     }
+
+    logger.info(
+      { botId, conversationId: result.conversationId },
+      "meeting-bot: transcript flush — conversation turn complete",
+    );
 
     // Synthesize the response text to speech via the plugin-api TTS handle,
     // which uses the assistant's globally configured TTS provider.
@@ -561,10 +549,13 @@ export function clearTranscriptBuffer(botId: string): void {
  * Extract concatenated text from a provider response's content blocks.
  * Non-text blocks (images, tool use, etc.) are skipped.
  */
-function extractTextFromContent(content: { type: string; text?: string }[]): string {
+function extractTextFromContent(content: ContentBlock[]): string {
   return content
-    .filter((block) => block.type === "text" && block.text)
-    .map((block) => block.text!)
+    .filter(
+      (block): block is Extract<ContentBlock, { type: "text" }> =>
+        block.type === "text",
+    )
+    .map((block) => block.text)
     .join(" ")
     .trim();
 }
