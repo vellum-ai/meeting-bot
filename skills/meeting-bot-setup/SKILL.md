@@ -15,10 +15,10 @@ Use this skill when the user needs to set up or fix the Recall.ai API key for th
 Before asking the user for anything, check whether a Recall API key is already stored:
 
 ```bash
-assistant credentials reveal --service meeting-bot --field api_key
+assistant credentials inspect --service meeting-bot --field api_key
 ```
 
-If a key is returned, it is already configured. If the command fails or returns empty, continue to Step 2.
+If the output shows `hasSecret: true`, the key is already configured. If the command fails or shows no secret, continue to Step 2.
 
 ## Step 2: Guide the user to get a Recall API key
 
