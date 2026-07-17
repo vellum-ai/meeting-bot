@@ -17,6 +17,9 @@ import type {
   NormalizedParticipantEvent,
   NormalizedUtterance,
 } from "./realtime-events.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { MeetingBotConfig } from "./config.ts";
 
 export interface TranscriptLine {
   at: number;
@@ -56,6 +59,12 @@ export function openSession(
 }
 
 export function getSession(botId: string): MeetingSession | undefined {
+  // If the session is not in memory, try loading from the sessions file.
+  // The join script writes sessions.json; the realtime server may not have
+  // synced yet if the bot was just created.
+  if (!sessions.has(botId)) {
+    syncSessionsFromFile();
+  }
   return sessions.get(botId);
 }
 
@@ -106,12 +115,114 @@ export function recordParticipantEvent(e: NormalizedParticipantEvent): void {
 }
 
 /**
+ * Load sessions from the sessions.json file written by the join script.
+ *
+ * The join script runs as a standalone bun process and writes session
+ * metadata (botId, meetingUrl, conversationId) to a JSON file in the
+ * plugin's data directory. This function reads that file and populates the
+ * in-memory sessions map so the realtime server can correlate incoming
+ * events with conversations. Existing in-memory sessions are preserved
+ * (they may have transcript data the file does not carry).
+ */
+export function loadSessionsFromFile(config: MeetingBotConfig): void {
+  // Derive the plugin data directory from the config's publicWsUrl is not
+  // possible. Instead, use the pluginStorageDir pattern: the sessions file
+  // lives at <plugin-root>/data/sessions.json. We resolve it relative to
+  // this module: src/ -> ../data/sessions.json
+  const moduleDir = new URL(".", import.meta.url).pathname;
+  const pluginRoot = join(moduleDir, "..");
+  const sessionsPath = join(pluginRoot, "data", "sessions.json");
+
+  if (!existsSync(sessionsPath)) return;
+
+  try {
+    const raw = readFileSync(sessionsPath, "utf-8");
+    const fileSessions = JSON.parse(raw) as Array<{
+      botId: string;
+      meetingUrl: string;
+      conversationId: string | null;
+      startedAt: number;
+    }>;
+
+    for (const fs of fileSessions) {
+      // Only add sessions not already in memory (in-memory sessions have
+      // live transcript data we don't want to lose).
+      if (!sessions.has(fs.botId)) {
+        sessions.set(fs.botId, {
+          botId: fs.botId,
+          meetingUrl: fs.meetingUrl,
+          conversationId: fs.conversationId,
+          startedAt: fs.startedAt,
+          transcript: [],
+          participants: new Map(),
+        });
+      } else {
+        // Update conversationId in case it was set after the session was
+        // created in memory.
+        const existing = sessions.get(fs.botId)!;
+        if (!existing.conversationId && fs.conversationId) {
+          existing.conversationId = fs.conversationId;
+        }
+      }
+    }
+  } catch {
+    // best-effort — if the file is malformed, skip
+  }
+}
+
+/**
+ * Sync sessions from the sessions.json file (config-less variant).
+ * Derives the path from this module's location: src/ -> ../data/sessions.json.
+ */
+function syncSessionsFromFile(): void {
+  const moduleDir = new URL(".", import.meta.url).pathname;
+  const pluginRoot = join(moduleDir, "..");
+  const sessionsPath = join(pluginRoot, "data", "sessions.json");
+
+  if (!existsSync(sessionsPath)) return;
+
+  try {
+    const raw = readFileSync(sessionsPath, "utf-8");
+    const fileSessions = JSON.parse(raw) as Array<{
+      botId: string;
+      meetingUrl: string;
+      conversationId: string | null;
+      startedAt: number;
+    }>;
+
+    for (const fs of fileSessions) {
+      if (!sessions.has(fs.botId)) {
+        sessions.set(fs.botId, {
+          botId: fs.botId,
+          meetingUrl: fs.meetingUrl,
+          conversationId: fs.conversationId,
+          startedAt: fs.startedAt,
+          transcript: [],
+          participants: new Map(),
+        });
+      } else {
+        const existing = sessions.get(fs.botId)!;
+        if (!existing.conversationId && fs.conversationId) {
+          existing.conversationId = fs.conversationId;
+        }
+      }
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+/**
  * Resolve the session an event belongs to. Prefers the explicit bot id; falls
  * back to the sole active session when the id is absent and there is no
  * ambiguity.
  */
 function resolveSession(botId?: string): MeetingSession | undefined {
-  if (botId) return sessions.get(botId);
+  if (botId) {
+    if (!sessions.has(botId)) syncSessionsFromFile();
+    return sessions.get(botId);
+  }
+  if (sessions.size === 0) syncSessionsFromFile();
   if (sessions.size === 1) return [...sessions.values()][0];
   return undefined;
 }

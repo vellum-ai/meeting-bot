@@ -11,8 +11,8 @@
  *
  * All calls are region-scoped and authenticated with the workspace API key in
  * the `Authorization` header, matching the Recall Create-Bot reference. The key
- * is resolved from the environment per call (see `resolveApiKey`) rather than
- * read from config, so the secret never lives in `config.json`.
+ * is resolved from the credential store per call (see `resolveApiKey`) rather
+ * than read from config, so the secret never lives in `config.json`.
  */
 
 import {

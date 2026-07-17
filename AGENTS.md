@@ -12,9 +12,10 @@ their realtime event streams. It is the Recall-backed counterpart to the
 ## Layout (discovery is by convention)
 
 ```
-hooks/init.ts        default-exports the init hook     (start realtime server)
+hooks/init.ts        default-exports the init hook     (start realtime server, write resolved-config.json)
 hooks/shutdown.ts    default-exports the shutdown hook  (stop realtime server)
-tools/*.ts           default-export a ToolDefinition each (auto-discovered)
+skills/meeting-bot/  join/leave skill with scripts       (run as standalone bun processes)
+skills/meeting-bot-setup/  setup skill with reload script (guides user through credential setup)
 src/                 internals (config, recall client, realtime server, store)
 ```
 
@@ -29,7 +30,12 @@ through `@vellumai/plugin-api` (hook context types, `ToolDefinition`,
 - Pin `@vellumai/plugin-api` as a `peerDependency` at `^0.10.3`.
 - No em-dash characters in source or docs; no PR numbers in code comments.
 - Config is validated once in `src/config.ts` (`resolveConfig`) and stashed in
-  `src/plugin-state.ts` for the tools. Tools call `requireConfig()`.
+  `src/plugin-state.ts` for in-process use (realtime server). The init hook
+  also writes `resolved-config.json` to the plugin's data directory so skill
+  scripts (join, leave) can read it. Sessions are written to `sessions.json`
+  by the join script and synced into the in-memory store by the realtime
+  server. The Recall API key is resolved from the credential store via
+  `assistant credentials reveal` (default credential: `meeting-bot:api_key`).
 
 ## Recall.ai model (why the hooks matter)
 

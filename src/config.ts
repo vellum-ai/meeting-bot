@@ -16,19 +16,20 @@
  *                     be reachable at this address.
  *
  * The Recall API key is deliberately *not* a config field. Config carries only
- * the credential's *name* (`apiKeyCredential`, default `recall:api_key`) so the
- * secret itself can live in the secure credential store / CES rather than as
- * plaintext in `config.json`. It is resolved from the environment at call time
- * (see {@link resolveApiKey}); the host provisions the secret into that env
- * from the credential store. Because the name defaults to `recall:api_key`, an
- * operator storing the key under that default name needs no config for it at
- * all — `config.json` then holds nothing sensitive.
+ * the credential's *name* (`apiKeyCredential`, default `meeting-bot:api_key`) so
+ * the secret itself can live in the secure credential store rather than as
+ * plaintext in `config.json`. It is resolved from the credential store at call
+ * time via `assistant credentials reveal` (see {@link resolveApiKey}); the
+ * `meeting-bot-setup` skill guides the user through storing the key. Because
+ * the name defaults to `meeting-bot:api_key`, an operator storing the key under
+ * that default name needs no config for it at all.
  *
  * Everything else has a working default. The realtime server binds locally on
  * `listenHost:listenPort`; a reverse proxy / tunnel maps `publicWsUrl` onto it.
  */
 
 import { z } from "zod";
+import { execSync } from "node:child_process";
 
 /**
  * Recall.ai regional deployments. Each region is a distinct base host of the
@@ -70,11 +71,11 @@ export const MeetingBotConfigSchema = z
       .string()
       .regex(
         /^[^\s:]+:[^\s:]+$/,
-        "must be a credential name of the form 'service:field' (e.g. recall:api_key)",
+        "must be a credential name of the form 'service:field' (e.g. meeting-bot:api_key)",
       )
-      .default("recall:api_key")
+      .default("meeting-bot:api_key")
       .describe(
-        "Name of the credential holding the Recall.ai workspace API key, in 'service:field' form. The secret itself is NOT stored here — it lives in the secure credential store / CES and is resolved from the environment at call time. Defaults to 'recall:api_key'; only set this when the key is stored under a different name.",
+        "Name of the credential holding the Recall.ai workspace API key, in 'service:field' form. The secret itself is NOT stored here — it lives in the secure credential store and is resolved at call time via `assistant credentials reveal`. Defaults to 'meeting-bot:api_key'; only set this when the key is stored under a different name.",
       ),
     region: z
       .enum(RECALL_REGIONS)
@@ -196,39 +197,48 @@ export function recallApiBase(region: RecallRegion): string {
 }
 
 /**
- * Map a `service:field` credential name to the environment variable the secret
- * is expected under: `recall:api_key` → `RECALL_API_KEY`. Non-alphanumeric
- * separators (`:`, `-`, `.`, `/`) collapse to `_` and the whole name is
- * upper-cased, matching the conventional env-var shape a host injects a
- * credential-store value into.
+ * Parse a `service:field` credential name into its components.
+ * `meeting-bot:api_key` -> `{ service: "meeting-bot", field: "api_key" }`.
  */
-export function credentialEnvVar(credentialName: string): string {
-  return credentialName.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+export function parseCredentialName(
+  credentialName: string,
+): { service: string; field: string } {
+  const parts = credentialName.split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error(
+      `Invalid credential name "${credentialName}" — expected "service:field" (e.g. meeting-bot:api_key)`,
+    );
+  }
+  return { service: parts[0]!, field: parts[1]! };
 }
 
 /**
- * Resolve the Recall API key from the environment.
+ * Resolve the Recall API key from the credential store.
  *
- * The secret is never read from `config.json`; config only names the credential
- * ({@link MeetingBotConfig.apiKeyCredential}, default `recall:api_key`). The
- * host provisions that credential's value into the process environment from the
- * secure credential store / CES, under the {@link credentialEnvVar}-derived
- * name. Resolving at call time (rather than caching at init) means a rotated
- * key is picked up and the plaintext is never stashed in plugin state.
+ * The secret is never read from `config.json` or from an environment variable.
+ * Instead, it is resolved from the secure credential store via the
+ * `assistant credentials reveal` CLI, which reads the plaintext value the
+ * same way the credentials tool does. Resolving at call time (rather than
+ * caching at init) means a rotated key is picked up immediately.
  *
- * Throws a descriptive error naming both the credential and the expected env
- * var when the value is absent — the caller (a tool) surfaces that to the user.
+ * Throws a descriptive error naming the credential when the value is absent.
  */
 export function resolveApiKey(config: MeetingBotConfig): string {
-  const envVar = credentialEnvVar(config.apiKeyCredential);
-  const value = (process.env[envVar] ?? "").trim();
-  if (!value) {
+  const { service, field } = parseCredentialName(config.apiKeyCredential);
+  try {
+    const value = execSync(
+      `assistant credentials reveal --service ${service} --field ${field}`,
+      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+    ).trim();
+    if (!value) throw new Error("empty credential");
+    return value;
+  } catch {
     throw new Error(
-      `Recall API key not found. The credential "${config.apiKeyCredential}" must be provisioned into the environment as ${envVar} ` +
-        `(the host injects it from the secure credential store / CES). It is intentionally never stored in config.json.`,
+      `Recall API key not found. The credential "${config.apiKeyCredential}" must be stored in the credential store. ` +
+        `Run: assistant credentials set --service ${service} --field ${field} <your_key>\n` +
+        `Get a key at https://recall.ai/dashboard`,
     );
   }
-  return value;
 }
 
 /**

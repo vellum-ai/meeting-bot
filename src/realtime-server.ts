@@ -47,6 +47,7 @@ import {
   getSession,
   recordParticipantEvent,
   recordUtterance,
+  loadSessionsFromFile,
 } from "./session-store.ts";
 
 /** Minimal logger surface (matches the host's PluginLogger shape). */
@@ -239,6 +240,12 @@ export function startRealtimeServer(
     });
 
     running = state;
+
+  // Sync sessions from the sessions file (written by the join script) so
+  // the realtime server can correlate incoming events with conversations.
+  // The join script runs as a separate process and writes sessions.json;
+  // the realtime server reads it to find the conversationId for each bot.
+  loadSessionsFromFile(state.config);
   });
 }
 
