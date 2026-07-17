@@ -10,6 +10,10 @@ metadata:
 
 Use this skill when the user explicitly asks the assistant to send a bot into a meeting to take notes or transcribe (e.g. "join this call", "have the bot take notes on this Zoom", usually with a meeting URL in context). The bot appears as a visible participant, so never do it proactively.
 
+## Prerequisites
+
+The Recall API key must be stored in the credential store. If joining fails with a 401 error, load the **meeting-bot-setup** skill to guide the user through providing their key.
+
 ## When to join
 
 Trigger on clear, explicit user requests only, paired with a meeting URL:
@@ -24,23 +28,29 @@ Do NOT trigger on:
 
 ## How to join
 
-Call `meeting_bot_join` with the meeting URL:
+Run the join script with the meeting URL and the current conversation ID:
 
-```
-meeting_bot_join(meeting_url: "https://meet.google.com/abc-defg-hij")
+```bash
+bun skills/meeting-bot/scripts/join.ts --meeting-url "https://meet.google.com/abc-defg-hij" --conversation-id "<current conversation id>"
 ```
 
-Recall.ai handles joining the call and begins streaming live transcript and participant events to the plugin's realtime receiver. The tool returns a bot id — keep it to leave later.
+The script reads the plugin's resolved config, resolves the Recall API key from the credential store, creates the bot, and registers the session. Recall.ai handles joining the call and begins streaming live transcript and participant events to the plugin's realtime receiver.
+
+The script outputs the bot id. Keep it to leave later.
 
 ## How to leave
 
-Call `meeting_bot_leave` when the user says the bot can go:
+Run the leave script when the user says the bot can go:
 
-```
-meeting_bot_leave(bot_id: "<id>")
+```bash
+bun skills/meeting-bot/scripts/leave.ts --bot-id "<id>"
 ```
 
-When only one bot is active, `bot_id` can be omitted.
+When only one bot is active, `--bot-id` can be omitted:
+
+```bash
+bun skills/meeting-bot/scripts/leave.ts
+```
 
 ## Supported platforms
 
