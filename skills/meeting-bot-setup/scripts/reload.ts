@@ -27,11 +27,13 @@ function run(cmd: string): { ok: boolean; output: string } {
 }
 
 function main(): void {
-  // Verify the credential is now set before reloading
+  // Verify the credential exists before reloading. Use inspect (not reveal)
+  // so the secret is never decrypted or printed — we only need to know it
+  // is present.
   const check = run(
-    "assistant credentials reveal --service meeting-bot --field api_key",
+    "assistant credentials inspect --service meeting-bot --field api_key --json",
   );
-  if (!check.ok || !check.output) {
+  if (!check.ok || !check.output.includes('"hasSecret":true')) {
     console.error(
       "Recall API key is not set in the credential store. " +
         "Store one with: assistant credentials set --service meeting-bot --field api_key <your_key>",
