@@ -1,10 +1,10 @@
 /**
  * Tests for Recall API-key resolution.
  *
- * `resolveApiKey` resolves from the credential store first (via
- * `assistant credentials reveal`) and falls back to an environment variable
- * when the CLI is not reachable: the fallback that keeps the automatic voice
- * response working in process contexts without the `assistant` CLI on PATH.
+ * `resolveApiKey` resolves the key from the secure credential store via
+ * `assistant credentials reveal`, and from nowhere else. In particular it must
+ * NOT read the key from an environment variable, since an env var holding the
+ * key would leak through the assistant's bash tool.
  *
  * `execSync` is mocked at the module level so the tests never shell out to the
  * real CLI; everything else in `node:child_process` is passed through.
@@ -32,7 +32,7 @@ mock.module("node:child_process", () => ({
   }),
 }));
 
-const { resolveApiKey, credentialEnvVarNames } = await import("../config.ts");
+const { resolveApiKey } = await import("../config.ts");
 
 function makeConfig(
   apiKeyCredential = "meeting-bot:api_key",
@@ -41,21 +41,6 @@ function makeConfig(
 }
 
 const ENV_KEYS = ["MEETING_BOT_API_KEY", "RECALL_API_KEY"];
-
-describe("credentialEnvVarNames", () => {
-  test("derives an env var name from the credential name", () => {
-    expect(credentialEnvVarNames("meeting-bot", "api_key")).toEqual([
-      "MEETING_BOT_API_KEY",
-      "RECALL_API_KEY",
-    ]);
-  });
-
-  test("de-duplicates when the derived name is the legacy name", () => {
-    expect(credentialEnvVarNames("recall", "api_key")).toEqual([
-      "RECALL_API_KEY",
-    ]);
-  });
-});
 
 describe("resolveApiKey", () => {
   beforeEach(() => {
@@ -67,28 +52,25 @@ describe("resolveApiKey", () => {
     for (const k of ENV_KEYS) delete process.env[k];
   });
 
-  test("returns the credential-store value when available", () => {
+  test("returns the credential-store value", () => {
     execSyncMode = "value";
     execSyncValue = "store-key";
-    process.env.MEETING_BOT_API_KEY = "env-key";
-    // The store is primary: env should not shadow a live credential.
     expect(resolveApiKey(makeConfig())).toBe("store-key");
   });
 
-  test("falls back to the env var when the CLI is unavailable", () => {
+  test("does not fall back to an environment variable", () => {
+    // The store yields nothing (CLI unavailable) and an env var is set: the
+    // key must still be treated as unresolved so it can never come from the
+    // environment.
     execSyncMode = "throw";
     process.env.MEETING_BOT_API_KEY = "env-key";
-    expect(resolveApiKey(makeConfig())).toBe("env-key");
-  });
-
-  test("honors the legacy RECALL_API_KEY env var", () => {
-    execSyncMode = "throw";
     process.env.RECALL_API_KEY = "legacy-key";
-    expect(resolveApiKey(makeConfig())).toBe("legacy-key");
+    expect(() => resolveApiKey(makeConfig())).toThrow(/Recall API key not found/);
   });
 
-  test("throws a descriptive error when no source yields a value", () => {
-    execSyncMode = "throw";
+  test("throws a descriptive error when the store is empty", () => {
+    execSyncMode = "value";
+    execSyncValue = "";
     expect(() => resolveApiKey(makeConfig())).toThrow(/Recall API key not found/);
   });
 });

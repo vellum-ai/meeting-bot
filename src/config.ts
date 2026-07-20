@@ -213,63 +213,33 @@ export function parseCredentialName(
 }
 
 /**
- * Candidate environment-variable names a host might inject the credential
- * under, derived from the `service:field` credential name. For
- * `meeting-bot:api_key` this yields `MEETING_BOT_API_KEY` (and the legacy
- * `RECALL_API_KEY`). Names are uppercased with non-alphanumerics collapsed to
- * underscores.
- */
-export function credentialEnvVarNames(service: string, field: string): string[] {
-  const norm = (s: string) =>
-    s.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
-  const primary = `${norm(service)}_${norm(field)}`;
-  // De-duplicate while preserving order; RECALL_API_KEY is a legacy name some
-  // deployments still inject.
-  return [...new Set([primary, "RECALL_API_KEY"])];
-}
-
-/**
- * Resolve the Recall API key.
+ * Resolve the Recall API key from the credential store.
  *
- * Resolution order (first hit wins):
- *   1. The secure credential store, via `assistant credentials reveal`. This
- *      is primary so a rotated key is picked up immediately.
- *   2. An environment variable named after the credential (see
- *      {@link credentialEnvVarNames}). Some process contexts (notably the
- *      realtime pipeline running where the `assistant` CLI is not on PATH)
- *      cannot shell out; the host may inject the key as an env var instead.
- *      Without this fallback the automatic voice response silently fails with
- *      "Recall API key not found" even though the key is available.
+ * The secret is resolved from the secure credential store via the
+ * `assistant credentials reveal` CLI, which reads the plaintext value the same
+ * way the credentials tool does. Resolving at call time (rather than caching at
+ * init) means a rotated key is picked up immediately.
  *
- * The secret is never read from `config.json`. Throws a descriptive error
- * naming the credential when no source yields a value.
+ * The key is never read from `config.json` or from an environment variable: an
+ * env var holding the key would leak through the assistant's bash tool. Throws
+ * a descriptive error naming the credential when the value is absent.
  */
 export function resolveApiKey(config: MeetingBotConfig): string {
   const { service, field } = parseCredentialName(config.apiKeyCredential);
-
-  // 1. Credential store (primary).
   try {
     const value = execSync(
       `assistant credentials reveal --service ${service} --field ${field}`,
       { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
     ).trim();
-    if (value) return value;
+    if (!value) throw new Error("empty credential");
+    return value;
   } catch {
-    // Fall through to the environment-variable fallback below.
+    throw new Error(
+      `Recall API key not found. The credential "${config.apiKeyCredential}" must be stored in the credential store. ` +
+        `Run: assistant credentials set --service ${service} --field ${field} <your_key>\n` +
+        `Get a key at https://recall.ai/dashboard`,
+    );
   }
-
-  // 2. Environment-variable fallback.
-  for (const name of credentialEnvVarNames(service, field)) {
-    const value = process.env[name]?.trim();
-    if (value) return value;
-  }
-
-  throw new Error(
-    `Recall API key not found. The credential "${config.apiKeyCredential}" must be stored in the credential store. ` +
-      `Run: assistant credentials set --service ${service} --field ${field} <your_key>\n` +
-      `Alternatively, provide it via the ${credentialEnvVarNames(service, field)[0]} environment variable.\n` +
-      `Get a key at https://recall.ai/dashboard`,
-  );
 }
 
 /**
