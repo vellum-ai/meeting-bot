@@ -21,20 +21,12 @@ const CREDENTIAL_SERVICE = "meeting-bot";
 const CREDENTIAL_FIELD = "api_key";
 
 /**
- * Environment variables the key may be injected under when the `assistant`
- * CLI is not reachable from this process context. Kept in sync with
- * `credentialEnvVarNames` in src/config.ts (`meeting-bot:api_key` ->
- * `MEETING_BOT_API_KEY`, plus the legacy `RECALL_API_KEY`).
- */
-const CREDENTIAL_ENV_VARS = ["MEETING_BOT_API_KEY", "RECALL_API_KEY"];
-
-/**
- * Resolve the Recall API key.
+ * Resolve the Recall API key from the credential store.
  *
- * Tries the secure credential store first (via `assistant credentials
- * reveal`), then falls back to an environment variable, since some process
- * contexts do not have the `assistant` CLI on PATH. Throws a helpful error
- * when no source yields a value.
+ * The key is resolved via `assistant credentials reveal` only. It is never
+ * read from an environment variable: an env var holding the key would leak
+ * through the assistant's bash tool. Throws a helpful error if no credential
+ * is stored.
  */
 export function getApiKey(): string {
   try {
@@ -42,22 +34,15 @@ export function getApiKey(): string {
       `assistant credentials reveal --service ${CREDENTIAL_SERVICE} --field ${CREDENTIAL_FIELD}`,
       { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
     ).trim();
-    if (key) return key;
+    if (!key) throw new Error("empty credential");
+    return key;
   } catch {
-    // Fall through to the environment-variable fallback below.
+    throw new Error(
+      "No Recall API key found in the credential store. " +
+        `Store one with: assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${CREDENTIAL_FIELD} <your_key>\n` +
+        "Get a key at https://recall.ai/dashboard",
+    );
   }
-
-  for (const name of CREDENTIAL_ENV_VARS) {
-    const value = process.env[name]?.trim();
-    if (value) return value;
-  }
-
-  throw new Error(
-    "No Recall API key found in the credential store. " +
-      `Store one with: assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${CREDENTIAL_FIELD} <your_key>\n` +
-      `Alternatively, provide it via the ${CREDENTIAL_ENV_VARS[0]} environment variable.\n` +
-      "Get a key at https://recall.ai/dashboard",
-  );
 }
 
 /**
