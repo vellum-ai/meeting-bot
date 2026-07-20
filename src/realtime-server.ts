@@ -31,6 +31,8 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { runConversationTurn, synthesizeText, type ContentBlock } from "@vellumai/plugin-api";
 
@@ -79,6 +81,14 @@ const STOP_GRACE_MS = 5_000;
 const KILL_GRACE_MS = 3_000;
 
 /**
+ * Name of the file, written under the plugin storage dir, that records the
+ * current realtime subprocess's PID. It lets a fresh daemon process (after a
+ * plugin reload) reap a subprocess the previous daemon left bound to the port,
+ * instead of dying with EADDRINUSE.
+ */
+const PID_FILE_NAME = "realtime-server.pid";
+
+/**
  * Debounce window for transcript buffering. When no new finalized transcript
  * event arrives for this duration, the buffered lines are flushed to the
  * conversation for LLM processing. A typical speaking pause is well under a
@@ -107,6 +117,8 @@ interface RunningServer {
   stderrBuffer: string;
   ready: boolean;
   config: MeetingBotConfig;
+  /** Path to the PID file for this subprocess, or null when not tracked. */
+  pidFilePath: string | null;
 }
 
 let running: RunningServer | null = null;
@@ -126,17 +138,33 @@ export function realtimeServerAddress(): string | null {
  * Spawn the realtime WebSocket server as a subprocess. Returns a promise that
  * resolves when the subprocess signals readiness (or rejects on timeout /
  * spawn failure). Idempotent: a second call while already running is a no-op.
+ *
+ * When `opts.pidFileDir` is supplied, the subprocess PID is recorded there and
+ * a subprocess orphaned by a previous plugin load is reaped before spawning;
+ * this is what prevents the "port 8790 in use" failure on reload.
  */
-export function startRealtimeServer(
+export async function startRealtimeServer(
   config: MeetingBotConfig,
   logger: Logger,
+  opts: { pidFileDir?: string } = {},
 ): Promise<void> {
   if (running) {
     logger.warn(
       { address: realtimeServerAddress() },
       "meeting-bot: realtime server already running",
     );
-    return Promise.resolve();
+    return;
+  }
+
+  const pidFilePath = opts.pidFileDir
+    ? join(opts.pidFileDir, PID_FILE_NAME)
+    : null;
+
+  // Reap a subprocess left bound to the port by a previous plugin load so the
+  // new spawn does not fail with EADDRINUSE. Best-effort: only a process that
+  // is verifiably our realtime subprocess is killed.
+  if (pidFilePath) {
+    await reapStaleSubprocess(pidFilePath, logger);
   }
 
   return new Promise<void>((resolve, reject) => {
@@ -168,7 +196,21 @@ export function startRealtimeServer(
       stderrBuffer: "",
       ready: false,
       config,
+      pidFilePath,
     };
+
+    // Record the PID so a future daemon process can reap this subprocess if it
+    // outlives us (e.g. across a plugin reload).
+    if (pidFilePath && typeof child.pid === "number") {
+      try {
+        writeFileSync(pidFilePath, String(child.pid), "utf-8");
+      } catch (err) {
+        logger.warn(
+          { error: String(err).slice(0, 200) },
+          "meeting-bot: failed to write realtime subprocess pid file",
+        );
+      }
+    }
 
     const readyTimer = setTimeout(() => {
       if (!state.ready) {
@@ -229,6 +271,7 @@ export function startRealtimeServer(
           { code, signal },
           "meeting-bot: realtime subprocess exited",
         );
+        removePidFile(state.pidFilePath);
         running = null;
       }
     });
@@ -255,7 +298,7 @@ export function startRealtimeServer(
  */
 export async function stopRealtimeServer(): Promise<void> {
   if (!running) return;
-  const { child, logger } = running;
+  const { child, logger, pidFilePath } = running;
 
   // Try graceful shutdown via stdin.
   try {
@@ -285,6 +328,7 @@ export async function stopRealtimeServer(): Promise<void> {
     }
   }
 
+  removePidFile(pidFilePath);
   running = null;
   // Cancel any pending transcript flush timers so they don't fire after the
   // receiver is down.
@@ -304,6 +348,112 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
       resolve(true);
     });
   });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** True if a process with `pid` currently exists (signal 0 probe). */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verify a PID belongs to *our* realtime subprocess before killing it, so a
+ * recycled PID now owned by an unrelated process is never signalled. Reads the
+ * process command line from `/proc` (Linux). When `/proc` is unavailable or
+ * the command line cannot be read, returns false: we would rather leave a
+ * stale process alone than risk killing the wrong one.
+ */
+function isOurSubprocess(pid: number): boolean {
+  try {
+    // /proc cmdline is NUL-separated; a substring match on the script name is
+    // enough to distinguish our subprocess from any recycled PID.
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf-8");
+    return cmdline.includes("realtime-subprocess");
+  } catch {
+    return false;
+  }
+}
+
+/** Remove the PID file, ignoring errors (it may already be gone). */
+function removePidFile(pidFilePath: string | null): void {
+  if (!pidFilePath) return;
+  try {
+    if (existsSync(pidFilePath)) unlinkSync(pidFilePath);
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Reap a realtime subprocess recorded in `pidFilePath` if it is still alive and
+ * verifiably ours. Escalates SIGTERM → SIGKILL and waits for the process to
+ * exit so its listen port is released before the caller spawns a replacement.
+ * Always clears the PID file when done.
+ */
+async function reapStaleSubprocess(
+  pidFilePath: string,
+  logger: Logger,
+): Promise<void> {
+  let pid: number;
+  try {
+    if (!existsSync(pidFilePath)) return;
+    pid = Number.parseInt(readFileSync(pidFilePath, "utf-8").trim(), 10);
+  } catch {
+    return;
+  }
+
+  if (!Number.isInteger(pid) || pid <= 0) {
+    removePidFile(pidFilePath);
+    return;
+  }
+
+  // Only signal a process we can positively identify as our subprocess.
+  if (!isProcessAlive(pid) || !isOurSubprocess(pid)) {
+    removePidFile(pidFilePath);
+    return;
+  }
+
+  logger.warn(
+    { pid },
+    "meeting-bot: reaping stale realtime subprocess from a previous load before restart",
+  );
+
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // already gone
+  }
+
+  const termDeadline = Date.now() + STOP_GRACE_MS;
+  while (Date.now() < termDeadline && isProcessAlive(pid)) {
+    await delay(100);
+  }
+
+  if (isProcessAlive(pid)) {
+    logger.warn(
+      { pid },
+      "meeting-bot: stale realtime subprocess did not exit on SIGTERM, sending SIGKILL",
+    );
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+    const killDeadline = Date.now() + KILL_GRACE_MS;
+    while (Date.now() < killDeadline && isProcessAlive(pid)) {
+      await delay(100);
+    }
+  }
+
+  removePidFile(pidFilePath);
 }
 
 /** Parse one stdout line from the subprocess and dispatch it. */

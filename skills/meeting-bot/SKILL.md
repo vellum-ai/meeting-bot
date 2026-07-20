@@ -36,6 +36,8 @@ bun skills/meeting-bot/scripts/join.ts --meeting-url "https://meet.google.com/ab
 
 The script reads the plugin's resolved config, resolves the Recall API key from the credential store, creates the bot, and registers the session. Recall.ai handles joining the call and begins streaming live transcript and participant events to the plugin's realtime receiver.
 
+After creating the bot, the script polls Recall to confirm the bot actually enters the call, so a silent join failure (invalid or expired URL, locked meeting, admission denied) is reported instead of looking like success. If the bot is still waiting to be admitted, the script reports that it was created but has not entered the call yet.
+
 The script outputs the bot id. Keep it to leave later.
 
 ## How to leave

@@ -89,7 +89,9 @@ const init = async (ctx: InitContext): Promise<void> => {
   }
 
   try {
-    await startRealtimeServer(config, ctx.logger);
+    await startRealtimeServer(config, ctx.logger, {
+      pidFileDir: ctx.pluginStorageDir,
+    });
 
     // If the operator did not supply a publicWsUrl, auto-provision a
     // Cloudflare Tunnel so Recall can reach the realtime server. This is
