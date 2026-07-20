@@ -8,10 +8,11 @@
  *   user plugin:   <workspace>/plugins/<plugin-name>/data/   (3 levels up)
  *   default plugin: <workspace>/plugins-data/<plugin>/        (2 levels up)
  *
- * Both are probed. `IDENTITY.md` is a markdown file whose first `# Heading` (or
- * a `name:` field) holds the assistant's name. The parse is intentionally
- * forgiving — a missing or unparsable file returns `null` so the caller can
- * fall back to Recall's default rather than failing the init hook.
+ * Both are probed. `IDENTITY.md` is a markdown file whose name lives in a
+ * `name:` field, a `- **Name:** ...` bullet (the standard Vellum template), or
+ * the first `# Heading`. The parse is intentionally forgiving: a missing or
+ * unparsable file returns `null` so the caller can fall back to Recall's
+ * default rather than failing the init hook.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -44,33 +45,62 @@ function resolveWorkspaceDir(pluginStorageDir: string): string | null {
  * Parse the assistant name from the contents of `IDENTITY.md`.
  *
  * Recognized forms (first match wins):
- *   - A `name:` field on its own line (e.g. `name: ApolloBot`).
+ *   - A plain `name:` field on its own line (e.g. `name: ApolloBot`).
+ *   - A markdown bullet with a bold-or-plain `Name:` key, e.g.
+ *     `- **Name:** Cade`, the form the standard Vellum IDENTITY.md template
+ *     uses.
  *   - The first top-level `# Heading`.
  *
- * Placeholder values like `_(not yet chosen)_` are rejected so an unconfigured
- * identity does not become a bot name.
+ * Placeholder values like `_(not yet chosen)_` and the file's own title
+ * heading (`# IDENTITY.md`) are rejected so an unconfigured identity does not
+ * become a bot name.
  */
 export function parseIdentityName(content: string): string | null {
   const lines = content.split("\n");
 
-  // `name:` field (YAML-ish front matter or plain line).
+  // 1. A plain `name:` field (YAML-ish front matter or plain line). Checked
+  //    first so an explicit field wins over a template bullet or heading.
   const nameField = lines.find((l) => /^\s*name:\s*(.+)/i.test(l));
   if (nameField) {
     const match = nameField.match(/^\s*name:\s*(.+)/i);
-    const name = match?.[1]?.trim();
+    const name = cleanValue(match?.[1]);
     if (name && !isPlaceholder(name)) return name;
   }
 
-  // First H1 heading.
+  // 2. A markdown bullet with a bold-or-plain `Name:` key, e.g.
+  //    `- **Name:** Cade` or `* Name: Cade`. This is the format the standard
+  //    Vellum IDENTITY.md template uses.
+  for (const line of lines) {
+    const bullet = line.match(/^\s*[-*]\s*\*{0,2}name\*{0,2}:\s*(.+)/i);
+    if (bullet) {
+      const name = cleanValue(bullet[1]);
+      if (name && !isPlaceholder(name)) return name;
+    }
+  }
+
+  // 3. First H1 heading.
   for (const line of lines) {
     const h1 = line.match(/^#\s+(.+)/);
     if (h1) {
-      const name = h1[1]!.trim();
-      if (!isPlaceholder(name)) return name;
+      const name = cleanValue(h1[1]);
+      if (name && !isPlaceholder(name)) return name;
     }
   }
 
   return null;
+}
+
+/**
+ * Trim a parsed value and strip surrounding markdown emphasis (`*`/`_`) so a
+ * bolded value like `**Cade**` resolves to `Cade`.
+ */
+function cleanValue(raw: string | undefined): string {
+  if (!raw) return "";
+  return raw
+    .trim()
+    .replace(/^[*_]+/, "")
+    .replace(/[*_]+$/, "")
+    .trim();
 }
 
 function isPlaceholder(name: string): boolean {

@@ -14,15 +14,27 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 /** Credential service/field for the Recall API key. */
 const CREDENTIAL_SERVICE = "meeting-bot";
 const CREDENTIAL_FIELD = "api_key";
 
 /**
- * Resolve the Recall API key from the credential store.
- * Throws a helpful error if no credential is stored.
+ * Environment variables the key may be injected under when the `assistant`
+ * CLI is not reachable from this process context. Kept in sync with
+ * `credentialEnvVarNames` in src/config.ts (`meeting-bot:api_key` ->
+ * `MEETING_BOT_API_KEY`, plus the legacy `RECALL_API_KEY`).
+ */
+const CREDENTIAL_ENV_VARS = ["MEETING_BOT_API_KEY", "RECALL_API_KEY"];
+
+/**
+ * Resolve the Recall API key.
+ *
+ * Tries the secure credential store first (via `assistant credentials
+ * reveal`), then falls back to an environment variable, since some process
+ * contexts do not have the `assistant` CLI on PATH. Throws a helpful error
+ * when no source yields a value.
  */
 export function getApiKey(): string {
   try {
@@ -30,15 +42,22 @@ export function getApiKey(): string {
       `assistant credentials reveal --service ${CREDENTIAL_SERVICE} --field ${CREDENTIAL_FIELD}`,
       { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
     ).trim();
-    if (!key) throw new Error("empty credential");
-    return key;
+    if (key) return key;
   } catch {
-    throw new Error(
-      "No Recall API key found in the credential store. " +
-        `Store one with: assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${CREDENTIAL_FIELD} <your_key>\n` +
-        "Get a key at https://recall.ai/dashboard",
-    );
+    // Fall through to the environment-variable fallback below.
   }
+
+  for (const name of CREDENTIAL_ENV_VARS) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+
+  throw new Error(
+    "No Recall API key found in the credential store. " +
+      `Store one with: assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${CREDENTIAL_FIELD} <your_key>\n` +
+      `Alternatively, provide it via the ${CREDENTIAL_ENV_VARS[0]} environment variable.\n` +
+      "Get a key at https://recall.ai/dashboard",
+  );
 }
 
 /**
@@ -48,7 +67,12 @@ export function getApiKey(): string {
  * The data directory is at <plugin-root>/data/.
  */
 function findPluginDataDir(): string {
-  const scriptDir = dirname(new URL(".", import.meta.url).pathname);
+  // `new URL(".", import.meta.url).pathname` is already the directory that
+  // contains this script (skills/meeting-bot/scripts/, with a trailing slash).
+  // Do NOT wrap it in dirname(): that drops the "scripts" segment and
+  // resolves the plugin root one level too high (e.g. <workspace>/plugins
+  // instead of <workspace>/plugins/meeting-bot).
+  const scriptDir = new URL(".", import.meta.url).pathname;
   // From skills/meeting-bot/scripts/ go up 3 levels to plugin root
   const pluginRoot = resolve(scriptDir, "..", "..", "..");
   const dataDir = join(pluginRoot, "data");
@@ -195,6 +219,46 @@ export async function createBot(
     throw new RecallApiError(`create bot failed (${res.status})`, res.status, text);
   }
   return JSON.parse(text) as RecallBot;
+}
+
+/**
+ * Fetch a bot's current server-side state from Recall. Used to poll join
+ * progress after {@link createBot}.
+ */
+export async function getBot(
+  config: ResolvedConfig,
+  botId: string,
+): Promise<RecallBot> {
+  const apiKey = getApiKey();
+  const res = await fetch(
+    `${recallApiBase(config.region)}bot/${encodeURIComponent(botId)}/`,
+    { method: "GET", headers: authHeaders(apiKey) },
+  );
+  const text = await res.text();
+  if (!res.ok) {
+    throw new RecallApiError(`get bot failed (${res.status})`, res.status, text);
+  }
+  return JSON.parse(text) as RecallBot;
+}
+
+/**
+ * Extract a coarse status code from a bot payload. Recall has used both a
+ * top-level `status_code` and a `status_changes` array (latest last) across
+ * API versions; this reads whichever is present so callers don't have to care.
+ */
+export function botStatusCode(bot: RecallBot): string | null {
+  if (typeof bot.status_code === "string" && bot.status_code) {
+    return bot.status_code;
+  }
+  const changes = (bot as { status_changes?: Array<{ code?: string }> })
+    .status_changes;
+  if (Array.isArray(changes) && changes.length > 0) {
+    const last = changes[changes.length - 1];
+    if (last && typeof last.code === "string") return last.code;
+  }
+  const status = (bot as { status?: { code?: string } }).status;
+  if (status && typeof status.code === "string") return status.code;
+  return null;
 }
 
 /**
