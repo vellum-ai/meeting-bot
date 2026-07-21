@@ -139,7 +139,13 @@ export const MeetingBotConfigSchema = z
       .boolean()
       .default(false)
       .describe(
-        "Whether the bot speaks its responses back into the meeting (voice mode). Editable from the configuration app. Not yet consumed by the join / voice-response paths.",
+        "Whether the bot speaks its responses back into the meeting (voice mode). When true, the assistant's response is synthesized to speech and played into the call; when false, the transcript is still processed but the bot does not speak (the standard path). Editable from the configuration app.",
+      ),
+    listenOnly: z
+      .boolean()
+      .default(false)
+      .describe(
+        "When true, the bot only listens and transcribes; it does not run a conversation turn or respond in the meeting. Defined for a future change and not consumed yet.",
       ),
     provider: z
       .enum(MEETING_PROVIDERS)

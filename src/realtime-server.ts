@@ -589,9 +589,11 @@ function bufferTranscript(
  * IDENTITY.md / SOUL.md, default-plugin injections) instead of a stateless
  * one-shot LLM call.
  *
- * After the turn responds, the response text is synthesized to speech via
- * the plugin-api TTS handle and sent to Recall's `output_audio` endpoint
- * so the bot speaks the response into the live meeting.
+ * In voice mode (the `useVoiceMode` config flag), the response text is then
+ * synthesized to speech via the plugin-api TTS handle and sent to Recall's
+ * `output_audio` endpoint so the bot speaks the response into the live meeting.
+ * Otherwise (the standard path) the turn still runs and responds in the
+ * conversation, but nothing is spoken into the meeting.
  *
  * Errors are logged but never thrown — a failed flush must not crash the
  * realtime receiver.
@@ -651,6 +653,16 @@ async function flushTranscriptBuffer(
       "meeting-bot: transcript flush — conversation turn complete",
     );
 
+    // Voice mode gate: only speak into the meeting when useVoiceMode is set.
+    // On the standard path the turn has already responded in the conversation.
+    if (!shouldSpeakResponses(config)) {
+      logger.debug(
+        { botId },
+        "meeting-bot: voice mode off, responding in conversation only (not speaking into the meeting)",
+      );
+      return;
+    }
+
     // Synthesize the response text to speech via the plugin-api TTS handle,
     // which uses the assistant's globally configured TTS provider.
     // Text is sanitized internally (markdown/URLs/emoji stripped).
@@ -700,6 +712,18 @@ export function clearTranscriptBuffer(botId: string): void {
   if (!state) return;
   if (state.timer) clearTimeout(state.timer);
   transcriptBuffers.delete(botId);
+}
+
+/**
+ * Whether the bot should speak its responses back into the meeting.
+ *
+ * Gated on the `useVoiceMode` config flag: true takes the voice path
+ * (synthesize the response and play it into the call); false takes the standard
+ * path (process the transcript and respond in the conversation, but stay silent
+ * in the meeting).
+ */
+export function shouldSpeakResponses(config: MeetingBotConfig): boolean {
+  return config.useVoiceMode === true;
 }
 
 /**
