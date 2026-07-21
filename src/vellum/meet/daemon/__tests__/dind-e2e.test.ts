@@ -351,8 +351,8 @@ describe("Meet DinD E2E (net-new coverage vs. docker-mode-e2e.test.ts)", () => {
       const portKey = `${MEET_BOT_INTERNAL_PORT}/tcp`;
       const bindings = body.HostConfig.PortBindings[portKey];
       expect(bindings).toEqual([{ HostIp: "127.0.0.1", HostPort: "0" }]);
-      expect(bindings[0].HostIp).not.toBe("0.0.0.0");
-      expect(bindings[0].HostIp).not.toBe("");
+      expect(bindings![0]!.HostIp).not.toBe("0.0.0.0");
+      expect(bindings![0]!.HostIp).not.toBe("");
 
       // The ephemeral port the daemon picks comes back via inspect and
       // must be propagated into the session record so the daemon's HTTP

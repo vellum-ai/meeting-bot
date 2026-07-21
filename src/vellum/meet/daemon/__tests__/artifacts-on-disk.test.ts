@@ -275,8 +275,8 @@ describe("Meet artifacts on disk (integration)", () => {
       expect(typeof line.timestamp).toBe("string");
       expect(typeof line.text).toBe("string");
     }
-    expect(transcriptLines[0].text).toBe("hello from alice");
-    expect(transcriptLines[1].text).toBe("hi alice this is bob");
+    expect(transcriptLines[0]!.text).toBe("hello from alice");
+    expect(transcriptLines[1]!.text).toBe("hi alice this is bob");
 
     // --- segments.jsonl -----------------------------------------------------
     const segmentsPath = join(baseDir, "segments.jsonl");
@@ -294,8 +294,8 @@ describe("Meet artifacts on disk (integration)", () => {
       expect(typeof line.end).toBe("string");
       expect(typeof line.speakerId).toBe("string");
     }
-    expect(segmentLines[0].speakerId).toBe("alice");
-    expect(segmentLines[1].speakerId).toBe("bob");
+    expect(segmentLines[0]!.speakerId).toBe("alice");
+    expect(segmentLines[1]!.speakerId).toBe("bob");
 
     // --- participants.json --------------------------------------------------
     const participantsPath = join(baseDir, "participants.json");

@@ -52,11 +52,11 @@ config-schema.ts     services.meet config schema (read from
 
 Kept intentionally minimal so diffs against meet-join history stay readable:
 
-- Six type-level fixes to compile under meeting-bot's stricter tsconfig
+- Seven type-level fixes to compile under meeting-bot's stricter tsconfig
   (`noUncheckedIndexedAccess`, narrower closure analysis):
   `daemon/chat-opportunity-detector.ts`, `daemon/consent-monitor.ts`,
   `src/ingress-listener.ts` (two casts), `routes/meet-internal.ts`,
-  `src/target-meeting.ts`.
+  `src/target-meeting.ts`, `meet-controller-ext/src/features/chat.ts`.
 - `src/plugin-api-host.ts` and `src/plugin-runtime.ts` are deleted: the
   Vellum Runtime subprocess builds its own SkillHost
   (`src/vellum/subprocess-host.ts`), and any future daemon-side needs call
@@ -72,12 +72,11 @@ Kept intentionally minimal so diffs against meet-join history stay readable:
 The whole tree (bot, extension, and tests included) typechecks under the
 root `tsconfig.json`; the per-package tsconfigs in bot/ and
 meet-controller-ext/ remain only for their standalone build/dev flows. The
-vendored suites are excluded from the default `bun test` run (see root
-`bunfig.toml`) because several need Docker, the bot image, a browser stack,
-or a live Meet; CI runs them in the non-blocking `vellum-runtime` job of
-`.github/workflows/test.yml`, and the goal is to stabilize them until that
-job can be made required. Run them locally with e.g.
-`bun test src/vellum/meet/daemon`.
+vendored suites are still excluded from the default `bun test` run (see
+root `bunfig.toml`) but pass in a bare environment (suites needing Docker or
+a live Meet self-skip), so CI runs them as a required job (`vellum-runtime`
+in `.github/workflows/test.yml`). Run them locally with
+`bun test ./src/vellum/meet`.
 
 ## Bot image
 

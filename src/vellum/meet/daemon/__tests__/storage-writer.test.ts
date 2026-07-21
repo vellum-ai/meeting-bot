@@ -425,9 +425,9 @@ describe("MeetStorageWriter segments.jsonl", () => {
       join(workspaceDir, "meets", "m1", "segments.jsonl"),
     );
     expect(lines).toHaveLength(1);
-    expect(lines[0].start).toBe("2024-01-01T00:00:00.000Z");
-    expect(typeof lines[0].end).toBe("string");
-    expect(lines[0].speakerId).toBe("s1");
+    expect(lines[0]!.start).toBe("2024-01-01T00:00:00.000Z");
+    expect(typeof lines[0]!.end).toBe("string");
+    expect(lines[0]!.speakerId).toBe("s1");
   });
 });
 
@@ -545,7 +545,7 @@ describe("MeetStorageWriter audio pipeline (mocked spawn)", () => {
 
     // Exactly one spawn; argv ends in the resolved audio.opus path.
     expect(calls()).toHaveLength(1);
-    const call = calls()[0];
+    const call = calls()[0]!;
     expect(call.cmd).toBe("ffmpeg");
     const argv = call.args;
     expect(argv[argv.length - 1]).toBe(

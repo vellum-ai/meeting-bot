@@ -2,8 +2,8 @@
 # Vellum Runtime tree under src/vellum/meet carries its own tests (including
 # Docker and live-meeting e2e suites that need a browser stack); run those
 # explicitly with `bun test src/vellum/meet/...` when working on that tree.
-# CI runs the vendored suites in the non-blocking vellum-runtime job of
-# .github/workflows/test.yml. TODO: stabilize them, fold the hermetic ones
-# into this default run, and delete this file.
+# CI runs the vendored suites as a required job (vellum-runtime in
+# .github/workflows/test.yml); they pass in a bare environment. TODO: fold
+# them into this default run and delete this file.
 [test]
 root = "src/__tests__"

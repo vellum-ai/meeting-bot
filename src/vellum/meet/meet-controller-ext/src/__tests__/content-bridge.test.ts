@@ -294,7 +294,7 @@ describe("startContentBridge bot→content fan-out", () => {
       fake.queryCalls.push(q);
       return tabsAvailable;
     };
-    const enable: BotToExtensionMessage = { type: "camera.enable" };
+    const enable = { type: "camera.enable" } as BotToExtensionMessage;
     const join: BotToExtensionMessage = {
       type: "join",
       meetingUrl: "https://meet.google.com/abc-defg-hij",

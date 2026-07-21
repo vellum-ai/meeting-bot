@@ -58,7 +58,7 @@ import type {
   TranscriptChunkEvent,
 } from "../../contracts/index.js";
 
-import type { AssistantEvent } from "../../plugin-host.js";
+import type { AssistantEvent, ServerMessage } from "../../plugin-host.js";
 
 import {
   buildTestHost,
@@ -168,6 +168,8 @@ function makeMockRunner() {
     remove: mock(async () => {}),
     inspect: mock(async () => ({ Id: "container-e2e-1" })),
     logs: mock(async () => ""),
+    kill: mock(async () => {}),
+    listContainers: mock(async () => []),
     // Container-exit watcher — fire-and-forget for this test. The smoke
     // suite exits sessions via `leave()` / `shutdownAll()` before the
     // watcher's promise would resolve, so a pending-forever promise is
@@ -234,12 +236,12 @@ function makeSpawnMock(): {
 }
 
 function captureHub(): {
-  received: AssistantEvent[];
+  received: AssistantEvent<ServerMessage>[];
   dispose: () => void;
 } {
-  const received: AssistantEvent[] = [];
+  const received: AssistantEvent<ServerMessage>[] = [];
   const sub = testHub.subscribe({}, (event) => {
-    received.push(event);
+    received.push(event as AssistantEvent<ServerMessage>);
   });
   return { received, dispose: () => sub.dispose() };
 }

@@ -46,7 +46,7 @@ function mockFetch(): void {
   globalThis.fetch = mock(async (url: string, init?: RequestInit) => {
     fetchCalls.push({ url: String(url), body: String(init?.body ?? "") });
     return new Response("{}", { status: 200 });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 function restoreFetch(): void {

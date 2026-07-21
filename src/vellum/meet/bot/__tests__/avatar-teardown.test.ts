@@ -369,7 +369,7 @@ const rendererCases: RendererCase[] = [
 
 describe.each(rendererCases)(
   "$name teardown leaves no orphan processes",
-  (caseDef) => {
+  (caseDef: (typeof rendererCases)[number]) => {
     beforeEach(() => {
       __resetAvatarRegistryForTests();
     });

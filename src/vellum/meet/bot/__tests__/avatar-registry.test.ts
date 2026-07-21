@@ -95,7 +95,7 @@ describe("resolveAvatarRenderer", () => {
     expect(renderer).not.toBeNull();
     expect(renderer).toBeInstanceOf(FakeAvatarRenderer);
     expect(constructed).toHaveLength(1);
-    expect(renderer).toBe(constructed[0]);
+    expect(renderer).toBe(constructed[0]!);
   });
 
   test("forwards the caller's config + deps into the factory", () => {
