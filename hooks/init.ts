@@ -79,7 +79,7 @@ const init = async (ctx: InitContext): Promise<void> => {
   // stored in the credential store. The meeting-bot-setup skill guides
   // the user through providing it.
   try {
-    resolveApiKey(config);
+    await resolveApiKey(config);
   } catch (err) {
     const { service, field } = parseCredentialName(config.apiKeyCredential);
     ctx.logger.warn(

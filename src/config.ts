@@ -19,8 +19,8 @@
  * the credential's *name* (`apiKeyCredential`, default `meeting-bot:api_key`) so
  * the secret itself can live in the secure credential store rather than as
  * plaintext in `config.json`. It is resolved from the credential store at call
- * time via `assistant credentials reveal` (see {@link resolveApiKey}); the
- * `meeting-bot-setup` skill guides the user through storing the key. Because
+ * time via the host's in-process `resolveCredential` (see {@link resolveApiKey});
+ * the `meeting-bot-setup` skill guides the user through storing the key. Because
  * the name defaults to `meeting-bot:api_key`, an operator storing the key under
  * that default name needs no config for it at all.
  *
@@ -29,7 +29,7 @@
  */
 
 import { z } from "zod";
-import { execSync } from "node:child_process";
+import { resolveCredential } from "@vellumai/plugin-api";
 
 /**
  * Recall.ai regional deployments. Each region is a distinct base host of the
@@ -234,22 +234,28 @@ export function parseCredentialName(
 /**
  * Resolve the Recall API key from the credential store.
  *
- * The secret is resolved from the secure credential store via the
- * `assistant credentials reveal` CLI, which reads the plaintext value the same
- * way the credentials tool does. Resolving at call time (rather than caching at
- * init) means a rotated key is picked up immediately.
+ * Uses the host's in-process `resolveCredential` rather than shelling out to
+ * `assistant credentials reveal`. The CLI path deadlocks the daemon: it runs
+ * inside the event loop (e.g. from the `init` hook), and a synchronous
+ * `execSync` blocks the loop while the spawned CLI tries to reach the daemon
+ * over IPC to fetch the credential, which the daemon cannot service while
+ * blocked, so it stalls until the CLI's IPC times out (~60s).
+ * `resolveCredential` stays in-process and yields, so the loop keeps running.
  *
- * The key is never read from `config.json` or from an environment variable: an
- * env var holding the key would leak through the assistant's bash tool. Throws
- * a descriptive error naming the credential when the value is absent.
+ * Resolving at call time (rather than caching at init) means a rotated key is
+ * picked up immediately. The key is never read from `config.json` or an
+ * environment variable. Throws a descriptive error naming the credential when
+ * the value is absent.
+ *
+ * Note: the standalone skill scripts (join/leave) still shell out via
+ * `assistant credentials reveal`; they run in their own process, not the
+ * daemon, so blocking there does not stall the event loop.
  */
-export function resolveApiKey(config: MeetingBotConfig): string {
+export async function resolveApiKey(config: MeetingBotConfig): Promise<string> {
   const { service, field } = parseCredentialName(config.apiKeyCredential);
   try {
-    const value = execSync(
-      `assistant credentials reveal --service ${service} --field ${field}`,
-      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
-    ).trim();
+    // `resolveCredential` takes a `service/field` reference (slash-separated).
+    const value = (await resolveCredential(`${service}/${field}`)).trim();
     if (!value) throw new Error("empty credential");
     return value;
   } catch {
