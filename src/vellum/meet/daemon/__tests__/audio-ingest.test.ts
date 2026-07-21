@@ -404,9 +404,9 @@ describe("MeetAudioIngest.start", () => {
       // The watchdog is the only pending timer — locate it and fire it.
       const pending = timers.filter((t) => !t.fired);
       expect(pending).toHaveLength(1);
-      expect(pending[0].ms).toBe(BOT_CONNECT_TIMEOUT_MS);
-      pending[0].cb();
-      pending[0].fired = true;
+      expect(pending[0]!.ms).toBe(BOT_CONNECT_TIMEOUT_MS);
+      pending[0]!.cb();
+      pending[0]!.fired = true;
 
       await expect(ready).rejects.toThrow(
         /bot did not connect to \*:\d+ within/,

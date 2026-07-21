@@ -333,7 +333,9 @@ describe("MeetBargeInWatcher — speaker.change cancel path", () => {
     // Cancel is queued but not yet fired.
     expect(watcher._hasPendingCancel()).toBe(true);
     expect(timer.pending.size).toBe(1);
-    const [{ ms }] = Array.from(timer.pending.values());
+    const [{ ms }] = Array.from(timer.pending.values()) as [
+      { cb: () => void; ms: number },
+    ];
     expect(ms).toBe(BARGE_IN_DEBOUNCE_MS);
     expect(session.cancelSpeak).toHaveBeenCalledTimes(0);
 
@@ -558,7 +560,9 @@ describe("MeetBargeInWatcher — fire-time guard", () => {
 
     dispatcher.dispatch(MEETING_ID, speakerChange(HUMAN_SPEAKER_ID));
     expect(timer.pending.size).toBe(1);
-    const [{ cb }] = Array.from(timer.pending.values());
+    const [{ cb }] = Array.from(timer.pending.values()) as [
+      { cb: () => void; ms: number },
+    ];
 
     // Flip `isBotSpeaking` to false via the production path, but capture
     // the queued cb BEFORE calling that path so the cb's closure is the

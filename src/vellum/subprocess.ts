@@ -55,7 +55,7 @@ import {
   createMeetSessionManager,
   type MeetSessionManagerDeps,
 } from "./meet/daemon/session-manager.ts";
-import { getMeetConfig, setMeetConfigOverrides } from "./meet/meet-config.ts";
+import { getMeetConfig } from "./meet/meet-config.ts";
 import { ensureBrowserStack } from "./meet/src/ensure-browser-stack.ts";
 import { startMeetIngressListener } from "./meet/src/ingress-listener.ts";
 import { setMeetHost } from "./meet/src/tool-runtime.ts";
@@ -143,20 +143,6 @@ async function main(): Promise<void> {
   });
   setMeetHost(host);
   const log = host.logger.get("vellum-runtime");
-
-  // Values consolidated into the plugin's own config.json win over the
-  // long-tail file config at <workspace>/config/meet.json.
-  setMeetConfigOverrides({
-    ...(args.config.meet.joinName !== undefined && {
-      joinName: args.config.meet.joinName,
-    }),
-    ...(args.config.meet.consentMessage !== undefined && {
-      consentMessage: args.config.meet.consentMessage,
-    }),
-    ...(args.config.meet.containerImage !== undefined && {
-      containerImage: args.config.meet.containerImage,
-    }),
-  });
 
   // Bot backend probe, mirroring meet-join's init hook: a Docker container
   // per meeting when an engine is reachable, else a direct child process.

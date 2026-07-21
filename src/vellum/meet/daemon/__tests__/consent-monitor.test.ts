@@ -15,6 +15,7 @@ import {
   LLM_CHECK_DEBOUNCE_MS,
   LLM_TICK_INTERVAL_MS,
   MeetConsentMonitor,
+  type MeetConsentMonitorDeps,
   type MeetSessionLeaver,
   type ObjectionDecision,
 } from "../consent-monitor.js";
@@ -189,7 +190,7 @@ describe("MeetConsentMonitor keyword fast-path → LLM confirm", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     dispatcher.dispatch(
@@ -238,7 +239,7 @@ describe("MeetConsentMonitor keyword fast-path → LLM confirm", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     dispatcher.dispatch(
@@ -283,7 +284,7 @@ describe("MeetConsentMonitor keyword fast-path → LLM confirm", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     dispatcher.dispatch(
@@ -336,7 +337,7 @@ describe("MeetConsentMonitor dedupe", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Three identical chunks within the dedupe window.
@@ -405,7 +406,7 @@ describe("MeetConsentMonitor timer tick", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Timer interval was installed at the expected cadence.
@@ -461,7 +462,7 @@ describe("MeetConsentMonitor timer tick", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     timer.fire();
@@ -499,7 +500,7 @@ describe("MeetConsentMonitor content-watermark tick skip", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Content arrives once before any timer fires.
@@ -563,7 +564,7 @@ describe("MeetConsentMonitor content-watermark tick skip", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Three ticks, each preceded by a fresh transcript chunk ~10s in.
@@ -615,7 +616,7 @@ describe("MeetConsentMonitor content-watermark tick skip", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Seed prior content + tick so the watermark catches up.
@@ -684,7 +685,7 @@ describe("MeetConsentMonitor content-watermark tick skip", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // First keyword hit: fires LLM (1) and advances the content watermark.
@@ -762,7 +763,7 @@ describe("MeetConsentMonitor prompt content", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Seed more than 5 chat messages — buffer should retain only the last 5.
@@ -842,7 +843,7 @@ describe("MeetConsentMonitor resilience", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // First keyword hit — LLM throws, should not reject or crash the test.
@@ -896,7 +897,7 @@ describe("MeetConsentMonitor resilience", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
     monitor.start();
     expect(dispatcher.subscriberCount("m1")).toBe(1);
@@ -930,7 +931,7 @@ describe("MeetConsentMonitor resilience", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     dispatcher.dispatch(
@@ -975,7 +976,7 @@ describe("MeetConsentMonitor resilience", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => 0,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Two distinct keyword-hit events while the first LLM call is pending.
@@ -1029,7 +1030,7 @@ describe("MeetConsentMonitor LLM check debounce", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // First keyword hit at t=0 — fires LLM.
@@ -1104,7 +1105,7 @@ describe("MeetConsentMonitor LLM check debounce", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Hit #1 at t=0: fires LLM.
@@ -1170,7 +1171,7 @@ describe("MeetConsentMonitor LLM check debounce", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Seed a non-keyword chunk so the tick has buffer content to work with
@@ -1241,7 +1242,7 @@ describe("MeetConsentMonitor LLM check debounce", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // First keyword hit at t=0 — fires LLM, decision is objected=true,
@@ -1319,7 +1320,7 @@ describe("MeetConsentMonitor long-meeting scenario", () => {
       setIntervalFn: timer.setIntervalFn,
       clearIntervalFn: timer.clearIntervalFn,
       now: () => t,
-    });
+    } as MeetConsentMonitorDeps);
     monitor.start();
 
     // Seed a single non-bot transcript at t=0 so `lastContentTimestamp`

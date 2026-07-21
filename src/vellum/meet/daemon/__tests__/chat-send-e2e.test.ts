@@ -43,7 +43,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import type { AssistantEvent } from "../../plugin-host.js";
+import type { AssistantEvent, ServerMessage } from "../../plugin-host.js";
 
 import {
   buildTestHost,
@@ -148,12 +148,12 @@ function startFakeBot(): FakeBotServer {
  * subscribers across tests.
  */
 function captureHub(): {
-  received: AssistantEvent[];
+  received: AssistantEvent<ServerMessage>[];
   dispose: () => void;
 } {
-  const received: AssistantEvent[] = [];
+  const received: AssistantEvent<ServerMessage>[] = [];
   const sub = testHub.subscribe({}, (event) => {
-    received.push(event);
+    received.push(event as AssistantEvent<ServerMessage>);
   });
   return { received, dispose: () => sub.dispose() };
 }
@@ -193,6 +193,8 @@ function makeMockRunnerPointingAt(fakeBot: FakeBotServer) {
     remove: mock(async () => {}),
     inspect: mock(async () => ({ Id: runResult.containerId })),
     logs: mock(async () => ""),
+    kill: mock(async () => {}),
+    listContainers: mock(async () => []),
     // `session-manager.ts` registers a container-exit watcher via
     // `runner.wait(containerId)` as part of `join()`. The watcher is
     // fire-and-forget for this test's HTTP-focused scenarios, so a
@@ -315,7 +317,7 @@ describe("MeetSessionManager.sendChat end-to-end (real HTTP + real event hub)", 
       await manager.sendChat("m-chat-unicode", text);
 
       expect(fakeBot.requests).toHaveLength(1);
-      const parsed = JSON.parse(fakeBot.requests[0]!.body) as { text: string };
+      const parsed = JSON.parse(fakeBot.requests[0]!.body) as ServerMessage & { text: string };
       expect(parsed.text).toBe(text);
 
       await Promise.resolve();
@@ -324,7 +326,7 @@ describe("MeetSessionManager.sendChat end-to-end (real HTTP + real event hub)", 
         (e) => e.message.type === "meet.chat_sent",
       );
       expect(chatSent).toHaveLength(1);
-      expect((chatSent[0]!.message as { text: string }).text).toBe(text);
+      expect((chatSent[0]!.message as ServerMessage & { text: string }).text).toBe(text);
 
       await manager.leave("m-chat-unicode", "cleanup");
     } finally {

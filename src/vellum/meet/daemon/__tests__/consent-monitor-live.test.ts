@@ -29,6 +29,7 @@ import type { MeetBotEvent } from "../../contracts/index.js";
 
 import {
   MeetConsentMonitor,
+  type MeetConsentMonitorDeps,
   type MeetSessionLeaver,
 } from "../consent-monitor.js";
 import type {
@@ -255,7 +256,7 @@ maybeDescribe("consent-monitor live LLM judgement", () => {
           subscribe: dispatcher.subscribe,
           setIntervalFn: timer.setIntervalFn,
           clearIntervalFn: timer.clearIntervalFn,
-        });
+        } as MeetConsentMonitorDeps);
         monitor.start();
 
         for (const event of fixture.events) {

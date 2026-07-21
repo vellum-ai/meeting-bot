@@ -319,7 +319,7 @@ export function startChatReader(opts: ChatReaderOptions): ChatReader {
         // (joined with newlines) are the message body. Covers the common
         // Meet rendering of sender+timestamp on one "row" followed by the
         // message bubble.
-        if (!fromName) fromName = lines[0];
+        if (!fromName) fromName = lines[0]!;
         if (!text) text = lines.slice(1).join("\n");
       }
     }

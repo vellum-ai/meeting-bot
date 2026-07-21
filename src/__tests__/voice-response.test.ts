@@ -52,7 +52,7 @@ function mockFetchResponses(
     const r = responses[idx] ?? { status: 200, body: "{}" };
     idx++;
     return new Response(r.body ?? "{}", { status: r.status ?? 200 });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   return { calls };
 }
 

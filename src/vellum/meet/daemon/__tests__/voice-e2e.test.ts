@@ -372,15 +372,15 @@ function captureHub(): CapturedHub {
     resolve: (m: ServerMessage) => void;
   }> = [];
   const sub = testHub.subscribe({}, (event) => {
-    events.push(event.message);
+    events.push(event.message as ServerMessage);
     // Snapshot so a resolver removing itself mid-iteration doesn't
     // skip a sibling.
     const snapshot = waiters.slice();
     for (let i = snapshot.length - 1; i >= 0; i--) {
       const w = snapshot[i]!;
-      if (w.predicate(event.message)) {
+      if (w.predicate(event.message as ServerMessage)) {
         waiters.splice(waiters.indexOf(w), 1);
-        w.resolve(event.message);
+        w.resolve(event.message as ServerMessage);
       }
     }
   });
@@ -577,7 +577,7 @@ describe("Meet voice E2E (bridge + watcher + real assistant-event-hub)", () => {
       await captured.waitFor(
         (m) =>
           m.type === "meet.speaking_started" &&
-          (m as { streamId: string }).streamId === "stream-happy",
+          (m as ServerMessage & { streamId: string }).streamId === "stream-happy",
       );
       expect(watcher._isBotSpeaking()).toBe(true);
 
@@ -599,8 +599,8 @@ describe("Meet voice E2E (bridge + watcher + real assistant-event-hub)", () => {
       const ended = (await captured.waitFor(
         (m) =>
           m.type === "meet.speaking_ended" &&
-          (m as { streamId: string }).streamId === "stream-happy",
-      )) as { reason: string; streamId: string };
+          (m as ServerMessage & { streamId: string }).streamId === "stream-happy",
+      )) as ServerMessage & { reason: string; streamId: string };
       expect(ended.reason).toBe("completed");
 
       // Watcher's flag flips back, no DELETE was issued.
@@ -715,9 +715,9 @@ describe("Meet voice E2E (bridge + watcher + real assistant-event-hub)", () => {
       const ended = (await captured.waitFor(
         (m) =>
           m.type === "meet.speaking_ended" &&
-          (m as { streamId: string }).streamId === "stream-barge",
+          (m as ServerMessage & { streamId: string }).streamId === "stream-barge",
         1500,
-      )) as { reason: string; streamId: string };
+      )) as ServerMessage & { reason: string; streamId: string };
       expect(ended.reason).toBe("cancelled");
     } finally {
       captured.dispose();
@@ -813,8 +813,8 @@ describe("Meet voice E2E (bridge + watcher + real assistant-event-hub)", () => {
       const ended = (await captured.waitFor(
         (m) =>
           m.type === "meet.speaking_ended" &&
-          (m as { streamId: string }).streamId === "stream-cough",
-      )) as { reason: string };
+          (m as ServerMessage & { streamId: string }).streamId === "stream-cough",
+      )) as ServerMessage & { reason: string };
       // Must have ended naturally (not cancelled / not error).
       expect(ended.reason).toBe("completed");
     } finally {

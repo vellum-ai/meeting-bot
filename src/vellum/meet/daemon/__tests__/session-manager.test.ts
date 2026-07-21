@@ -18,7 +18,7 @@ import {
   test,
 } from "bun:test";
 
-import type { AssistantEvent } from "../../plugin-host.js";
+import type { AssistantEvent, ServerMessage } from "../../plugin-host.js";
 
 import {
   buildTestHost,
@@ -63,6 +63,8 @@ interface MockRunner {
   inspect: ReturnType<typeof mock>;
   logs: ReturnType<typeof mock>;
   wait: ReturnType<typeof mock>;
+  kill: ReturnType<typeof mock>;
+  listContainers: ReturnType<typeof mock>;
   /**
    * Test helper: synchronously resolve the pending `wait(containerId)`
    * promise with the given exit code. Used to simulate an unexpected bot
@@ -134,6 +136,8 @@ function makeMockRunner(
           pendingWaits.set(containerId, resolve);
         }),
     ),
+    kill: mock(async () => {}),
+    listContainers: mock(async () => []),
     fireContainerExit: (containerId: string, exitCode: number) => {
       const resolver = pendingWaits.get(containerId);
       if (!resolver) return;
@@ -274,7 +278,7 @@ describe("MeetSessionManager.join", () => {
     // responsible for translating them to binds (bare-metal) or named-volume
     // Mounts (Docker). See `docker-runner.test.ts` for that resolution.
     expect(runner.run).toHaveBeenCalledTimes(1);
-    const runOpts = runner.run.mock.calls[0][0] as {
+    const runOpts = runner.run.mock.calls[0]![0] as {
       image: string;
       env: Record<string, string>;
       workspaceMounts: Array<{
@@ -723,9 +727,9 @@ describe("MeetSessionManager max-minutes timeout", () => {
 
 describe("MeetSessionManager container-exit watcher", () => {
   function captureHub() {
-    const received: AssistantEvent[] = [];
+    const received: AssistantEvent<ServerMessage>[] = [];
     const sub = testHub.subscribe({}, (event) => {
-      received.push(event);
+      received.push(event as AssistantEvent<ServerMessage>);
     });
     return { received, dispose: () => sub.dispose() };
   }
@@ -754,7 +758,7 @@ describe("MeetSessionManager container-exit watcher", () => {
       // Sanity: watcher installed exactly one `wait(containerId)` call for
       // this meeting's container.
       expect(runner.wait).toHaveBeenCalledTimes(1);
-      expect(runner.wait.mock.calls[0][0]).toBe("container-123");
+      expect(runner.wait.mock.calls[0]![0]).toBe("container-123");
 
       // Pretend some external process (stray daemon reaper, user
       // `docker kill`, OOM reaper, etc.) terminated the bot container
@@ -780,7 +784,7 @@ describe("MeetSessionManager container-exit watcher", () => {
       // client can render a useful error state.
       const errors = received.filter((e) => e.message.type === "meet.error");
       expect(errors.length).toBeGreaterThanOrEqual(1);
-      const detail = (errors[errors.length - 1]!.message as { detail: string })
+      const detail = (errors[errors.length - 1]!.message as ServerMessage & { detail: string })
         .detail;
       expect(detail).toContain("bot container exited unexpectedly");
       expect(detail).toContain("137");
@@ -1072,9 +1076,9 @@ describe("MeetSessionManager audio ingest wiring", () => {
 
 describe("MeetSessionManager event-hub lifecycle publication", () => {
   function captureHub() {
-    const received: AssistantEvent[] = [];
+    const received: AssistantEvent<ServerMessage>[] = [];
     const sub = testHub.subscribe({}, (event) => {
-      received.push(event);
+      received.push(event as AssistantEvent<ServerMessage>);
     });
     return { received, dispose: () => sub.dispose() };
   }
@@ -1106,12 +1110,12 @@ describe("MeetSessionManager event-hub lifecycle publication", () => {
       expect(meetTypes).toContain("meet.left");
 
       const joining = received.find((e) => e.message.type === "meet.joining")!;
-      expect((joining.message as { url: string }).url).toBe(
+      expect((joining.message as ServerMessage & { url: string }).url).toBe(
         "https://meet.google.com/aaa",
       );
 
       const left = received.find((e) => e.message.type === "meet.left")!;
-      expect((left.message as { reason: string }).reason).toBe(
+      expect((left.message as ServerMessage & { reason: string }).reason).toBe(
         "user-requested",
       );
     } finally {
@@ -1191,7 +1195,7 @@ describe("MeetSessionManager event-hub lifecycle publication", () => {
 
       const errors = received.filter((e) => e.message.type === "meet.error");
       expect(errors).toHaveLength(1);
-      expect((errors[0]!.message as { detail: string }).detail).toContain(
+      expect((errors[0]!.message as ServerMessage & { detail: string }).detail).toContain(
         "docker down",
       );
     } finally {
@@ -1231,7 +1235,7 @@ describe("MeetSessionManager event-hub lifecycle publication", () => {
 
       const errors = received.filter((e) => e.message.type === "meet.error");
       expect(errors).toHaveLength(1);
-      expect((errors[0]!.message as { detail: string }).detail).toBe(
+      expect((errors[0]!.message as ServerMessage & { detail: string }).detail).toBe(
         "join rejected by host",
       );
 
@@ -1248,7 +1252,7 @@ describe("MeetSessionManager event-hub lifecycle publication", () => {
 
 describe("MeetSessionManager JOIN_NAME resolution", () => {
   function runOpts(runner: MockRunner) {
-    return runner.run.mock.calls[0][0] as {
+    return runner.run.mock.calls[0]![0] as {
       env: Record<string, string>;
     };
   }
@@ -1299,7 +1303,7 @@ describe("MeetSessionManager JOIN_NAME resolution", () => {
 
     const env = runOpts(runner).env;
     expect(env.JOIN_NAME).toBe(MEET_JOIN_NAME_FALLBACK);
-    expect(env.JOIN_NAME.length).toBeGreaterThan(0);
+    expect(env.JOIN_NAME!.length).toBeGreaterThan(0);
     // Substituted consent message uses the same effective name.
     expect(env.CONSENT_MESSAGE).toContain(MEET_JOIN_NAME_FALLBACK);
 
@@ -1544,7 +1548,7 @@ describe("MeetSessionManager bridge + writer wiring", () => {
     // The PcmSource passed to startAudio should route to the audio-ingest
     // tee — verify that subscribing on the source calls subscribePcm.
     const ingest = audioIngestFactory.getLastIngest()!;
-    const sourceArg = writerStartAudio.mock.calls[0][0] as {
+    const sourceArg = writerStartAudio.mock.calls[0]![0] as {
       subscribe: (cb: (bytes: Uint8Array) => void) => () => void;
     };
     const received: Uint8Array[] = [];
@@ -1553,7 +1557,7 @@ describe("MeetSessionManager bridge + writer wiring", () => {
 
     ingest.pushPcm(new Uint8Array([1, 2, 3]));
     expect(received).toHaveLength(1);
-    expect(Array.from(received[0])).toEqual([1, 2, 3]);
+    expect(Array.from(received[0]!)).toEqual([1, 2, 3]);
 
     unsubscribe();
     ingest.pushPcm(new Uint8Array([9]));

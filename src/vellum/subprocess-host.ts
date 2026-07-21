@@ -1,10 +1,10 @@
 /**
  * SkillHost implementation for the Vellum Runtime subprocess.
  *
- * The runtime executes outside the daemon, so the plugin-api-backed host
- * bridge (`meet/src/plugin-api-host.ts`) does not apply here: there is no
- * InitContext and no daemon services to call. This host keeps everything the
- * vendored subsystem needs local to the subprocess:
+ * The runtime executes outside the daemon: there is no InitContext and no
+ * daemon services to call, so plugin-api methods are not available here.
+ * This host keeps everything the vendored subsystem needs local to the
+ * subprocess:
  *
  *   - `logger` relays structured lines to the parent daemon over stdout
  *     (the supervisor forwards them to the plugin logger),
@@ -14,9 +14,9 @@
  *   - conversation writes are intentionally no-ops: transcripts reach the
  *     conversation daemon-side through meeting-bot's transcript-flush
  *     pipeline, not through `memory.addMessage`,
- *   - LLM / STT / TTS / speaker facets degrade exactly like the vendored
- *     plugin-api bridge does (empty / null / throw), since the sub-modules
- *     that would consume them are replaced with no-ops by the runtime.
+ *   - LLM / STT / TTS / speaker facets degrade to their documented
+ *     unavailable values (empty / null / throw), since the sub-modules that
+ *     would consume them are replaced with no-ops by the runtime.
  */
 
 import {

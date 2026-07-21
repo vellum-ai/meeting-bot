@@ -275,6 +275,8 @@ function makeMockRunnerPointingAt(fakeBot: FakeBotServer) {
     remove: mock(async () => {}),
     inspect: mock(async () => ({ Id: runResult.containerId })),
     logs: mock(async () => ""),
+    kill: mock(async () => {}),
+    listContainers: mock(async () => []),
     // Container-exit watcher is registered from `join()` via
     // `runner.wait(...)`; these tests don't exercise unexpected container
     // exits, so a never-resolving promise is fine.

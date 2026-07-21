@@ -182,7 +182,7 @@ function handleFrame(raw: string | Buffer): void {
   send({ type: "event", event: msg.event, data: msg.data });
 }
 
-function clientAddr(req: Request, srv: Server): string {
+function clientAddr(req: Request, srv: Server<SocketData>): string {
   const fwd = req.headers.get("x-forwarded-for");
   if (fwd) return fwd.split(",")[0]!.trim();
   return srv.requestIP(req)?.address ?? "unknown";

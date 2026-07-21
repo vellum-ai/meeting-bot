@@ -193,7 +193,11 @@ describe("DockerRunner.run", () => {
     // Verify the request sequence the runner issued.
     expect(mock.captured).toHaveLength(3);
 
-    const [create, start, inspect] = mock.captured;
+    const [create, start, inspect] = mock.captured as [
+      CapturedRequest,
+      CapturedRequest,
+      CapturedRequest,
+    ];
 
     expect(create.method).toBe("POST");
     expect(create.url).toContain("/containers/create");
@@ -234,7 +238,7 @@ describe("DockerRunner.run", () => {
     expect(result.containerId).toBe("noname");
     expect(result.boundPorts).toEqual([]);
 
-    const [create] = mock.captured;
+    const [create] = mock.captured as [CapturedRequest];
     expect(create.url).not.toContain("name=");
   });
 
@@ -250,8 +254,8 @@ describe("DockerRunner.run", () => {
 
     // Create + start + cleanup remove = 3 calls.
     expect(mock.captured).toHaveLength(3);
-    expect(mock.captured[2].method).toBe("DELETE");
-    expect(mock.captured[2].url).toContain("/containers/fail1");
+    expect(mock.captured[2]!.method).toBe("DELETE");
+    expect(mock.captured[2]!.url).toContain("/containers/fail1");
   });
 });
 
@@ -270,9 +274,9 @@ describe("DockerRunner.stop", () => {
     await runner.stop("cid", 7);
 
     expect(mock.captured).toHaveLength(1);
-    expect(mock.captured[0].method).toBe("POST");
-    expect(mock.captured[0].url).toContain("/containers/cid/stop");
-    expect(mock.captured[0].url).toContain("t=7");
+    expect(mock.captured[0]!.method).toBe("POST");
+    expect(mock.captured[0]!.url).toContain("/containers/cid/stop");
+    expect(mock.captured[0]!.url).toContain("t=7");
   });
 
   test("treats 304 (already stopped) as success", async () => {
@@ -307,10 +311,10 @@ describe("DockerRunner.remove", () => {
     await runner.remove("cid");
 
     expect(mock.captured).toHaveLength(1);
-    expect(mock.captured[0].method).toBe("DELETE");
-    expect(mock.captured[0].url).toContain("/containers/cid");
-    expect(mock.captured[0].url).toContain("force=true");
-    expect(mock.captured[0].url).toContain("v=true");
+    expect(mock.captured[0]!.method).toBe("DELETE");
+    expect(mock.captured[0]!.url).toContain("/containers/cid");
+    expect(mock.captured[0]!.url).toContain("force=true");
+    expect(mock.captured[0]!.url).toContain("v=true");
   });
 
   test("treats 404 (already gone) as success", async () => {
@@ -341,8 +345,8 @@ describe("DockerRunner.inspect", () => {
 
     expect(result.Id).toBe("cid");
     expect(result.State?.Running).toBe(true);
-    expect(mock.captured[0].method).toBe("GET");
-    expect(mock.captured[0].url).toContain("/containers/cid/json");
+    expect(mock.captured[0]!.method).toBe("GET");
+    expect(mock.captured[0]!.url).toContain("/containers/cid/json");
   });
 });
 
@@ -362,8 +366,8 @@ describe("DockerRunner.wait", () => {
 
     expect(result.StatusCode).toBe(137);
     expect(mock.captured).toHaveLength(1);
-    expect(mock.captured[0].method).toBe("POST");
-    expect(mock.captured[0].url).toContain("/containers/cid/wait");
+    expect(mock.captured[0]!.method).toBe("POST");
+    expect(mock.captured[0]!.url).toContain("/containers/cid/wait");
   });
 
   test("treats 404 (container already removed) as an exit-code-0 observation", async () => {
@@ -638,7 +642,7 @@ describe("DockerRunner workspace-mount mode branching", () => {
     // Bare-metal mode skips the /_ping probe; only create + start + inspect.
     expect(mock.captured).toHaveLength(3);
 
-    const createBody = JSON.parse(mock.captured[0].body);
+    const createBody = JSON.parse(mock.captured[0]!.body);
     expect(createBody.HostConfig.Binds).toEqual([
       "/ws/meets/m1/sockets:/sockets",
       "/ws/meets/m1/out:/out",
@@ -694,10 +698,10 @@ describe("DockerRunner workspace-mount mode branching", () => {
 
     // /_ping first, then create/start/inspect.
     expect(mock.captured).toHaveLength(4);
-    expect(mock.captured[0].method).toBe("GET");
-    expect(mock.captured[0].url).toContain("/_ping");
+    expect(mock.captured[0]!.method).toBe("GET");
+    expect(mock.captured[0]!.url).toContain("/_ping");
 
-    const createBody = JSON.parse(mock.captured[1].body);
+    const createBody = JSON.parse(mock.captured[1]!.body);
     // Simple host-path binds — daemon-internal /workspace paths that inner
     // dockerd can resolve. No named-volume Mounts payload.
     expect(createBody.HostConfig.Binds).toEqual([
@@ -828,9 +832,9 @@ describe("DockerRunner.listContainers", () => {
     });
 
     expect(result).toHaveLength(1);
-    expect(result[0].Id).toBe("c1");
+    expect(result[0]!.Id).toBe("c1");
 
-    const [req] = mock.captured;
+    const [req] = mock.captured as [CapturedRequest];
     expect(req.method).toBe("GET");
     expect(req.url).toContain("/containers/json");
     expect(req.url).toContain("filters=");
@@ -858,9 +862,9 @@ describe("DockerRunner.kill", () => {
     await runner.kill("cid", "SIGTERM");
 
     expect(mock.captured).toHaveLength(1);
-    expect(mock.captured[0].method).toBe("POST");
-    expect(mock.captured[0].url).toContain("/containers/cid/kill");
-    expect(mock.captured[0].url).toContain("signal=SIGTERM");
+    expect(mock.captured[0]!.method).toBe("POST");
+    expect(mock.captured[0]!.url).toContain("/containers/cid/kill");
+    expect(mock.captured[0]!.url).toContain("signal=SIGTERM");
   });
 
   test("defaults to SIGKILL when no signal is supplied", async () => {
@@ -869,7 +873,7 @@ describe("DockerRunner.kill", () => {
 
     const runner = new DockerRunner({ socketPath: mock.socketPath });
     await runner.kill("cid");
-    expect(mock.captured[0].url).toContain("signal=SIGKILL");
+    expect(mock.captured[0]!.url).toContain("signal=SIGKILL");
   });
 
   test("swallows 404 and 409 (already-dead container)", async () => {
@@ -1187,7 +1191,7 @@ describe("reapOrphanedMeetBots", () => {
             [MEET_BOT_MEETING_ID_LABEL]: "meeting-old",
             // No MEET_BOT_INSTANCE_LABEL — this container was created by a
             // daemon version before the instance-scope change shipped.
-          },
+          } as Record<string, string>,
         },
         {
           Id: "c-orphan",

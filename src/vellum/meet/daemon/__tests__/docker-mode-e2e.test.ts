@@ -362,7 +362,7 @@ describe("Meet Docker-mode spawn-arg E2E", () => {
       // ── Env vars expected by the meet-bot ──
       const env = envToMap(body.Env);
       expect(env.DAEMON_URL).toBe("http://host.docker.internal:7821");
-      expect(env.DAEMON_URL.startsWith("http://host.docker.internal:")).toBe(
+      expect(env.DAEMON_URL!.startsWith("http://host.docker.internal:")).toBe(
         true,
       );
       expect(env.DAEMON_URL).not.toContain("127.0.0.1");
@@ -371,7 +371,7 @@ describe("Meet Docker-mode spawn-arg E2E", () => {
       expect(env.MEET_URL).toBe("https://meet.google.com/abc-defg-hij");
       expect(env.JOIN_NAME).toBe("Atlas");
       expect(env.BOT_API_TOKEN).toMatch(/^[0-9a-f]{64}$/);
-      expect(env.CONSENT_MESSAGE.length).toBeGreaterThan(0);
+      expect(env.CONSENT_MESSAGE!.length).toBeGreaterThan(0);
       expect(env.CONSENT_MESSAGE).not.toContain("{assistantName}");
       expect(env.CONSENT_MESSAGE).toContain("Atlas");
       expect(env.TTS_API_KEY).toBe("tts-k");
@@ -381,8 +381,8 @@ describe("Meet Docker-mode spawn-arg E2E", () => {
       expect(body.HostConfig.NetworkMode).toBe("bridge");
 
       // Confirm the Docker API saw a ping before create.
-      expect(engine.captured[0].method).toBe("GET");
-      expect(engine.captured[0].url).toContain("/_ping");
+      expect(engine.captured[0]!.method).toBe("GET");
+      expect(engine.captured[0]!.url).toContain("/_ping");
     } finally {
       await manager.leave("m-docker-1", "test-cleanup");
     }
