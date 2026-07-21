@@ -4,6 +4,9 @@
  * A compiled (v2) React app served in the workspace panel. The host build maps
  * `react` / `react-dom` onto `preact/compat`, so this is ordinary React. It
  * talks to the plugin's routes under `/x/plugins/meeting-bot/`.
+ *
+ * The Configuration view shows the whole plugin config. A few fields are
+ * editable (voice mode, provider, region); the rest are shown read-only.
  */
 
 import React, { useEffect, useState } from "react";
@@ -14,9 +17,24 @@ const BASE = "/x/plugins/meeting-bot";
 const PROVIDERS = ["recall", "vellum"] as const;
 type Provider = (typeof PROVIDERS)[number];
 
-interface Settings {
+const REGIONS = [
+  "us-east-1",
+  "us-west-2",
+  "eu-central-1",
+  "ap-northeast-1",
+] as const;
+type Region = (typeof REGIONS)[number];
+
+interface ConfigView {
   useVoiceMode: boolean;
   provider: Provider;
+  region: Region;
+  apiKeyCredential?: string;
+  publicWsUrl?: string;
+  listenHost?: string;
+  listenPort?: number;
+  events?: string[];
+  transcript?: { provider?: string; languageCode?: string; mode?: string };
 }
 
 interface Meeting {
@@ -35,11 +53,22 @@ function formatTime(ms: number): string {
   }
 }
 
+/** Rows of read-only config shown below the editable fields. */
+function readOnlyRows(config: ConfigView): Array<[string, string]> {
+  return [
+    ["Public WS URL", config.publicWsUrl || "(not set)"],
+    ["API key credential", config.apiKeyCredential || "-"],
+    ["Listen host", config.listenHost || "-"],
+    ["Listen port", config.listenPort != null ? String(config.listenPort) : "-"],
+    ["Realtime events", (config.events ?? []).join(", ") || "-"],
+    ["Transcript provider", config.transcript?.provider || "-"],
+    ["Transcript language", config.transcript?.languageCode || "-"],
+    ["Transcript mode", config.transcript?.mode || "-"],
+  ];
+}
+
 function Configuration() {
-  const [settings, setSettings] = useState<Settings>({
-    useVoiceMode: false,
-    provider: "recall",
-  });
+  const [config, setConfig] = useState<ConfigView | null>(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -47,8 +76,8 @@ function Configuration() {
     let cancelled = false;
     fetch(`${BASE}/settings`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((s: Settings | null) => {
-        if (s && !cancelled) setSettings(s);
+      .then((c: ConfigView | null) => {
+        if (c && !cancelled) setConfig(c);
       })
       .catch(() => {});
     return () => {
@@ -57,16 +86,21 @@ function Configuration() {
   }, []);
 
   async function save() {
+    if (!config) return;
     setSaving(true);
     setStatus("Saving...");
     try {
       const res = await fetch(`${BASE}/settings`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify({
+          useVoiceMode: config.useVoiceMode,
+          provider: config.provider,
+          region: config.region,
+        }),
       });
       if (res.ok) {
-        setSettings(await res.json());
+        setConfig(await res.json());
         setStatus("Saved");
       } else {
         setStatus("Save failed");
@@ -83,34 +117,68 @@ function Configuration() {
     <section>
       <h2>Configuration</h2>
       <div className="card">
-        <div className="row">
-          <label htmlFor="useVoiceMode">Use Voice Mode</label>
-          <input
-            id="useVoiceMode"
-            type="checkbox"
-            checked={settings.useVoiceMode}
-            onChange={(e) =>
-              setSettings({ ...settings, useVoiceMode: e.target.checked })
-            }
-          />
-        </div>
-        <div className="row">
-          <label htmlFor="provider">Provider</label>
-          <select
-            id="provider"
-            value={settings.provider}
-            onChange={(e) =>
-              setSettings({ ...settings, provider: e.target.value as Provider })
-            }
-          >
-            <option value="recall">Recall</option>
-            <option value="vellum">Vellum</option>
-          </select>
-        </div>
-        <button onClick={save} disabled={saving}>
-          Save
-        </button>
-        <span className="status">{status}</span>
+        {config === null ? (
+          <div className="empty">Loading...</div>
+        ) : (
+          <>
+            <div className="row">
+              <label htmlFor="useVoiceMode">Use Voice Mode</label>
+              <input
+                id="useVoiceMode"
+                type="checkbox"
+                checked={config.useVoiceMode}
+                onChange={(e) =>
+                  setConfig({ ...config, useVoiceMode: e.target.checked })
+                }
+              />
+            </div>
+            <div className="row">
+              <label htmlFor="provider">Provider</label>
+              <select
+                id="provider"
+                value={config.provider}
+                onChange={(e) =>
+                  setConfig({ ...config, provider: e.target.value as Provider })
+                }
+              >
+                <option value="recall">Recall</option>
+                <option value="vellum">Vellum</option>
+              </select>
+            </div>
+            <div className="row">
+              <label htmlFor="region">Region</label>
+              <select
+                id="region"
+                value={config.region}
+                onChange={(e) =>
+                  setConfig({ ...config, region: e.target.value as Region })
+                }
+              >
+                {REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button onClick={save} disabled={saving}>
+              Save
+            </button>
+            <span className="status">{status}</span>
+
+            <div className="readonly">
+              <div className="readonly-title">Other configuration (read-only)</div>
+              <dl>
+                {readOnlyRows(config).map(([label, value]) => (
+                  <div className="dl-row" key={label}>
+                    <dt>{label}</dt>
+                    <dd className="mono">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
