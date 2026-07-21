@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 /**
- * leave.ts - Have a Recall bot leave its meeting.
+ * leave.ts - Have a meeting bot leave its meeting.
  *
- * Asks Recall to have the bot leave the call, then removes the local session.
- * When a single bot is active, the bot id may be omitted; with several live
- * bots it must be given explicitly.
+ * The session entry records which provider owns the bot: Recall bots leave
+ * via the Recall REST API; vellum bots leave via the daemon's local control
+ * endpoint (the daemon supervises the bot subprocess and cleans up the
+ * session itself). When a single bot is active, the bot id may be omitted;
+ * with several live bots it must be given explicitly.
  *
  * Usage:
  *   bun leave.ts [--bot-id <id>]
@@ -16,6 +18,7 @@ import {
   readSessions,
   RecallApiError,
   removeSession,
+  vellumControlPost,
 } from "./meeting-bot-client.ts";
 
 interface Args {
@@ -48,6 +51,24 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     targetBotId = sessions[0]!.botId;
+  }
+
+  // Vellum-provider sessions leave via the daemon's control endpoint; the
+  // daemon removes the persisted session itself (removeSession here is a
+  // harmless belt-and-braces cleanup for the local view).
+  const target = sessions.find((s) => s.botId === targetBotId);
+  if (target?.provider === "vellum") {
+    try {
+      await vellumControlPost("leave", { meetingId: targetBotId });
+      removeSession(targetBotId);
+      console.log(`Vellum meet bot ${targetBotId} is leaving the meeting.`);
+    } catch (err) {
+      removeSession(targetBotId);
+      console.error(`Failed to leave: ${String(err)}`);
+      console.error("Local session cleared.");
+      process.exit(1);
+    }
+    return;
   }
 
   let config;

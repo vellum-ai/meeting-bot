@@ -531,17 +531,7 @@ function dispatchEvent(
 
   if (msg.event.startsWith("transcript.")) {
     const utterance = extractUtterance(msg);
-    if (utterance) {
-      // Always record finalized utterances in the session store (existing
-      // behavior). recordUtterance already skips partials.
-      recordUtterance(utterance);
-
-      // Buffer finalized utterances and debounce a flush to the conversation.
-      // Partials churn too fast and are not useful for LLM processing.
-      if (!utterance.isPartial && utterance.botId) {
-        bufferTranscript(utterance.botId, utterance, logger, config);
-      }
-    }
+    if (utterance) ingestUtterance(utterance, logger, config);
     return;
   }
 
@@ -552,6 +542,32 @@ function dispatchEvent(
   }
 
   logger.debug({ event: msg.event }, "meeting-bot: unhandled realtime event");
+}
+
+/**
+ * Ingest one normalized utterance into the transcript pipeline: record it in
+ * the session store and, for finalized utterances, buffer it toward the
+ * debounced conversation flush.
+ *
+ * This is the shared entry point for every transcript source. The Recall
+ * realtime receiver calls it from its event dispatch; the vellum provider
+ * (`src/vellum-meet.ts`) calls it directly with utterances adapted from the
+ * in-house meet bot's transcript events.
+ */
+export function ingestUtterance(
+  utterance: NormalizedUtterance,
+  logger: Logger,
+  config: MeetingBotConfig,
+): void {
+  // Always record finalized utterances in the session store. recordUtterance
+  // already skips partials.
+  recordUtterance(utterance);
+
+  // Buffer finalized utterances and debounce a flush to the conversation.
+  // Partials churn too fast and are not useful for LLM processing.
+  if (!utterance.isPartial && utterance.botId) {
+    bufferTranscript(utterance.botId, utterance, logger, config);
+  }
 }
 
 /**
@@ -652,6 +668,18 @@ async function flushTranscriptBuffer(
       { botId, conversationId: result.conversationId },
       "meeting-bot: transcript flush — conversation turn complete",
     );
+
+    // Voice output goes through Recall's output_audio endpoint, which only
+    // exists for Recall-provider sessions. Vellum-provider sessions (the
+    // in-house meet bot) have no voice path wired yet; speaking there is a
+    // future change on the bot's /play_audio endpoint.
+    if (session.provider === "vellum") {
+      logger.debug(
+        { botId },
+        "meeting-bot: vellum-provider session — skipping Recall voice output",
+      );
+      return;
+    }
 
     // TODO(useVoiceMode): when config.useVoiceMode is set, produce the voice
     // response via the host's createLiveVoiceConnection live-voice API instead

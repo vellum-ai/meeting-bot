@@ -65,8 +65,11 @@ export const REALTIME_EVENTS = [
 export type RealtimeEvent = (typeof REALTIME_EVENTS)[number];
 
 /**
- * Meeting-bot provider options. Chooses which backend the bot uses. Editable
- * from the configuration app. Not yet consumed by the join path.
+ * Meeting-bot provider options. Chooses which backend the bot uses:
+ * "recall" (Recall.ai drives the browser and streams realtime events back)
+ * or "vellum" (the in-house meet bot vendored under meet/ joins the call and
+ * streams events through the local ingress). Editable from the configuration
+ * app; consumed by the init hook and the join/leave skill scripts.
  */
 export const MEETING_PROVIDERS = ["recall", "vellum"] as const;
 export type MeetingProvider = (typeof MEETING_PROVIDERS)[number];
@@ -151,7 +154,7 @@ export const MeetingBotConfigSchema = z
       .enum(MEETING_PROVIDERS)
       .default("recall")
       .describe(
-        "Which meeting provider the bot uses. Editable from the configuration app. Not yet consumed by the join path.",
+        "Which meeting provider the bot uses: 'recall' (Recall.ai, the default) or 'vellum' (the in-house meet bot). Selected at plugin load; editable from the configuration app and picked up on the next reload.",
       ),
   })
   .describe(

@@ -12,13 +12,14 @@ their realtime event streams. It is the Recall-backed counterpart to the
 ## Layout (discovery is by convention)
 
 ```
-hooks/init.ts        default-exports the init hook     (start realtime server, write resolved-config.json)
-hooks/shutdown.ts    default-exports the shutdown hook  (stop realtime server)
+hooks/init.ts        default-exports the init hook     (provider switch: Recall realtime server, or the vellum meet runtime)
+hooks/shutdown.ts    default-exports the shutdown hook  (stop whichever runtime is up)
 routes/*.ts          HTTP routes under /x/plugins/meeting-bot/ (named GET/PATCH exports)
 apps/meeting-bot-dashboard/  workspace-panel app (compiled React under src/) for history + settings
-skills/meeting-bot/  join/leave skill with scripts       (run as standalone bun processes)
+skills/meeting-bot/  join/leave skill with scripts       (run as standalone bun processes; branch on config.provider)
 skills/meeting-bot-setup/  setup skill with reload script (guides user through credential setup)
-src/                 internals (config, recall client, realtime server, store, app routes/settings)
+src/                 internals (config, recall client, realtime server, store, app routes/settings, vellum-meet runtime)
+meet/                vendored meet-join subsystem backing provider "vellum" (see meet/AGENTS.md)
 ```
 
 There is no `register.ts` and no host stub: the plugin talks to the host only
