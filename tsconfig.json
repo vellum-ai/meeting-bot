@@ -15,5 +15,5 @@
     "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["hooks", "tools", "src"]
+  "include": ["hooks", "routes", "tools", "src"]
 }
