@@ -26,7 +26,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import type { InitContext } from "@vellumai/plugin-api";
 
@@ -46,10 +46,35 @@ import {
   removePersistedSession,
 } from "../session-store.ts";
 import { MeetBotEventSchema, type MeetBotEvent } from "./meet/contracts/index.ts";
-import { resolveWorkspaceDirFromContext } from "./meet/src/plugin-api-host.ts";
 
 /** File under data/ the skill scripts read to reach the control endpoint. */
 export const VELLUM_CONTROL_FILE = "vellum-control.json";
+
+/**
+ * Resolve the assistant workspace directory (moved here from the deleted
+ * plugin-api host bridge).
+ *
+ * Preference order: `VELLUM_WORKSPACE_DIR`, then derivation from
+ * `pluginStorageDir` (`<workspace>/plugins/<name>/data` or
+ * `<workspace>/plugins-data/<name>`), then the storage dir itself with a
+ * warning.
+ */
+export function resolveWorkspaceDirFromContext(ctx: InitContext): string {
+  const fromEnv = process.env.VELLUM_WORKSPACE_DIR;
+  if (fromEnv && fromEnv.trim().length > 0) return fromEnv;
+
+  const storageDir = ctx.pluginStorageDir;
+  const grandParent = dirname(dirname(storageDir));
+  if (basename(grandParent) === "plugins") return dirname(grandParent);
+  const parent = dirname(storageDir);
+  if (basename(parent) === "plugins-data") return dirname(parent);
+
+  ctx.logger.warn(
+    { pluginStorageDir: storageDir },
+    "meeting-bot: could not resolve the workspace dir (VELLUM_WORKSPACE_DIR unset, unrecognized plugin dir layout), falling back to the plugin storage dir",
+  );
+  return storageDir;
+}
 
 /** Time to wait for the subprocess to signal readiness. */
 const READY_TIMEOUT_MS = 30_000;
