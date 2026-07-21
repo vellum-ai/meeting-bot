@@ -7,28 +7,23 @@
  * extraction helper.
  *
  * Credential resolution is mocked at the module level via `mock.module` so
- * that `execSync` in config.ts returns a test key without hitting the real
- * `assistant credentials reveal` CLI. Only `execSync` is overridden; the rest
- * of `node:child_process` (notably `spawn`) is passed through unchanged so
- * other test files that need the real implementation are not affected.
+ * that `resolveCredential` in config.ts returns a test key without reaching the
+ * host. Everything else in `@vellumai/plugin-api` is passed through unchanged.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { MeetingBotConfig } from "../config.ts";
 
-// Grab the real module so we can pass through everything except execSync.
-const realChildProcess = await import("node:child_process");
+// Grab the real module so we can pass through everything except resolveCredential.
+const realPluginApi = await import("@vellumai/plugin-api");
 
 let mockApiKey: string | null = null;
 
-mock.module("node:child_process", () => ({
-  ...realChildProcess,
-  execSync: mock((cmd: string) => {
-    if (mockApiKey !== null && cmd.includes("credentials reveal")) {
-      return mockApiKey;
-    }
-    // Fall through to the real execSync for anything else.
-    return realChildProcess.execSync(cmd, { encoding: "utf-8" });
+mock.module("@vellumai/plugin-api", () => ({
+  ...realPluginApi,
+  resolveCredential: mock(async (_ref: string) => {
+    if (mockApiKey !== null) return mockApiKey;
+    throw new Error("credential not found");
   }),
 }));
 

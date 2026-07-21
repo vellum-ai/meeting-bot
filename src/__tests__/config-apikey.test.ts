@@ -1,34 +1,33 @@
 /**
  * Tests for Recall API-key resolution.
  *
- * `resolveApiKey` resolves the key from the secure credential store via
- * `assistant credentials reveal`, and from nowhere else. In particular it must
- * NOT read the key from an environment variable, since an env var holding the
- * key would leak through the assistant's bash tool.
+ * `resolveApiKey` resolves the key via the host's in-process
+ * `resolveCredential`, and from nowhere else. In particular it must NOT read
+ * the key from an environment variable, since an env var holding the key would
+ * leak through the assistant's bash tool.
  *
- * `execSync` is mocked at the module level so the tests never shell out to the
- * real CLI; everything else in `node:child_process` is passed through.
+ * `resolveCredential` is mocked at the module level so the tests never reach
+ * the host; everything else in `@vellumai/plugin-api` is passed through.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type { MeetingBotConfig } from "../config.ts";
 
-const realChildProcess = await import("node:child_process");
+const realPluginApi = await import("@vellumai/plugin-api");
 
-let execSyncMode: "throw" | "value" = "throw";
-let execSyncValue = "";
+let credentialMode: "throw" | "value" = "throw";
+let credentialValue = "";
+let lastRef: string | null = null;
 
-mock.module("node:child_process", () => ({
-  ...realChildProcess,
-  execSync: mock((cmd: string, opts?: unknown) => {
-    if (typeof cmd === "string" && cmd.includes("credentials reveal")) {
-      if (execSyncMode === "throw") {
-        throw new Error("assistant: command not found");
-      }
-      return execSyncValue;
+mock.module("@vellumai/plugin-api", () => ({
+  ...realPluginApi,
+  resolveCredential: mock(async (ref: string) => {
+    lastRef = ref;
+    if (credentialMode === "throw") {
+      throw new Error("credential not found");
     }
-    return realChildProcess.execSync(cmd as string, opts as never);
+    return credentialValue;
   }),
 }));
 
@@ -44,33 +43,44 @@ const ENV_KEYS = ["MEETING_BOT_API_KEY", "RECALL_API_KEY"];
 
 describe("resolveApiKey", () => {
   beforeEach(() => {
-    execSyncMode = "throw";
-    execSyncValue = "";
+    credentialMode = "throw";
+    credentialValue = "";
+    lastRef = null;
     for (const k of ENV_KEYS) delete process.env[k];
   });
   afterEach(() => {
     for (const k of ENV_KEYS) delete process.env[k];
   });
 
-  test("returns the credential-store value", () => {
-    execSyncMode = "value";
-    execSyncValue = "store-key";
-    expect(resolveApiKey(makeConfig())).toBe("store-key");
+  test("returns the resolved credential value", async () => {
+    credentialMode = "value";
+    credentialValue = "store-key";
+    expect(await resolveApiKey(makeConfig())).toBe("store-key");
   });
 
-  test("does not fall back to an environment variable", () => {
-    // The store yields nothing (CLI unavailable) and an env var is set: the
-    // key must still be treated as unresolved so it can never come from the
-    // environment.
-    execSyncMode = "throw";
+  test("passes the credential as a slash-separated service/field ref", async () => {
+    credentialMode = "value";
+    credentialValue = "store-key";
+    await resolveApiKey(makeConfig("recall:api_key"));
+    expect(lastRef).toBe("recall/api_key");
+  });
+
+  test("does not fall back to an environment variable", async () => {
+    // The store yields nothing and an env var is set: the key must still be
+    // treated as unresolved so it can never come from the environment.
+    credentialMode = "throw";
     process.env.MEETING_BOT_API_KEY = "env-key";
     process.env.RECALL_API_KEY = "legacy-key";
-    expect(() => resolveApiKey(makeConfig())).toThrow(/Recall API key not found/);
+    await expect(resolveApiKey(makeConfig())).rejects.toThrow(
+      /Recall API key not found/,
+    );
   });
 
-  test("throws a descriptive error when the store is empty", () => {
-    execSyncMode = "value";
-    execSyncValue = "";
-    expect(() => resolveApiKey(makeConfig())).toThrow(/Recall API key not found/);
+  test("throws a descriptive error when the credential is empty", async () => {
+    credentialMode = "value";
+    credentialValue = "";
+    await expect(resolveApiKey(makeConfig())).rejects.toThrow(
+      /Recall API key not found/,
+    );
   });
 });
