@@ -35,12 +35,14 @@ describe("handleMeetingsGet", () => {
 });
 
 describe("handleSettingsGet", () => {
-  test("returns JSON with the settings shape", async () => {
+  test("returns the config view shape without the shared secret", async () => {
     const res = handleSettingsGet();
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { useVoiceMode: unknown; provider: unknown };
+    const body = (await res.json()) as Record<string, unknown>;
     expect(typeof body.useVoiceMode).toBe("boolean");
     expect(["recall", "vellum"]).toContain(body.provider);
+    expect(typeof body.region).toBe("string");
+    expect(body).not.toHaveProperty("verificationToken");
   });
 });
 
@@ -50,8 +52,16 @@ describe("handleSettingsPatch validation", () => {
     expect(res.status).toBe(400);
   });
 
-  test("rejects unknown fields with 400", async () => {
-    const res = await handleSettingsPatch(patch(JSON.stringify({ apiKey: "leak" })));
+  test("rejects an invalid region with 400", async () => {
+    const res = await handleSettingsPatch(patch(JSON.stringify({ region: "moon-1" })));
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects non-editable / unknown fields with 400", async () => {
+    // publicWsUrl is a real config field but not editable from the app.
+    const res = await handleSettingsPatch(
+      patch(JSON.stringify({ publicWsUrl: "wss://evil" })),
+    );
     expect(res.status).toBe(400);
   });
 

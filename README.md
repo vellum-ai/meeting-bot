@@ -63,10 +63,7 @@ visible in the assistant's process tree (`assistant ps`).
 
 The plugin ships a workspace-panel app (`apps/meeting-bot-dashboard/`) for
 viewing meeting history and editing settings, backed by plugin HTTP routes
-(`routes/`). Both are standard Vellum plugin extension surfaces (see
-[Apps](https://www.vellum.ai/docs/extensibility/apps) and
-[Routes](https://www.vellum.ai/docs/extensibility/routes)), so the host serves
-them; the plugin does not stand up its own web server.
+(`routes/`).
 
 The app is a compiled React app (`apps/meeting-bot-dashboard/src/`, built by the
 host into `dist/`). It calls the plugin's routes, served under
@@ -75,21 +72,24 @@ host into `dist/`). It calls the plugin's routes, served under
 | Route                                    | Purpose                                       |
 | ---------------------------------------- | --------------------------------------------- |
 | `GET /x/plugins/meeting-bot/meetings`    | Meeting history as JSON (newest first).       |
-| `GET /x/plugins/meeting-bot/settings`    | Current editable settings as JSON.            |
-| `PATCH /x/plugins/meeting-bot/settings`  | Update settings; returns the new settings.    |
+| `GET /x/plugins/meeting-bot/settings`    | The resolved config for display, as JSON.     |
+| `PATCH /x/plugins/meeting-bot/settings`  | Update the editable fields; returns the view. |
 
-Two settings are editable:
+The app shows the whole config. Three fields are editable; the rest are shown
+read-only.
 
-| Setting        | Type                       | Default  |
-| -------------- | -------------------------- | -------- |
-| `useVoiceMode` | boolean                    | `false`  |
-| `provider`     | enum (`recall` / `vellum`) | `recall` |
+| Editable field | Type                       | Default     |
+| -------------- | -------------------------- | ----------- |
+| `useVoiceMode` | boolean                    | `false`     |
+| `provider`     | enum (`recall` / `vellum`) | `recall`    |
+| `region`       | enum (Recall regions)      | `us-east-1` |
 
 Settings persist to the plugin's `config.json` (the same host-owned config the
-`init` hook reads); an edit merges into that file, preserving other fields.
-Meeting history is read from `data/sessions.json`. Nothing consumes these
-settings to change behavior yet; a later change wires them into the join /
-voice-response paths.
+`init` hook reads); an edit merges into that file, preserving other fields. The
+`GET`/`PATCH` view omits `verificationToken` so the realtime shared secret is
+never sent to the browser. Meeting history is read from `data/sessions.json`.
+Nothing consumes the editable fields to change behavior yet; a later change
+wires them into the join / voice-response paths.
 
 ## Configuration
 

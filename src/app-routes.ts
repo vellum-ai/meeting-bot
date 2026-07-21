@@ -9,9 +9,9 @@
  */
 
 import {
-  AppSettingsUpdateSchema,
-  readAppSettings,
-  updateAppSettings,
+  applyConfigUpdate,
+  ConfigUpdateSchema,
+  readConfigView,
 } from "./app-settings.ts";
 import { readMeetingHistory } from "./meeting-history.ts";
 import { pluginConfigPath, pluginDataDir } from "./plugin-paths.ts";
@@ -28,15 +28,19 @@ export function handleMeetingsGet(): Response {
   return json(readMeetingHistory(pluginDataDir()));
 }
 
-/** `GET /x/plugins/meeting-bot/settings`: current editable settings. */
+/**
+ * `GET /x/plugins/meeting-bot/settings`: the full resolved config for display
+ * (minus the realtime shared secret). The app renders a few fields editable and
+ * the rest read-only.
+ */
 export function handleSettingsGet(): Response {
-  return json(readAppSettings(pluginConfigPath()));
+  return json(readConfigView(pluginConfigPath()));
 }
 
 /**
- * `PATCH /x/plugins/meeting-bot/settings`: apply a partial settings update and
- * return the new settings. Rejects a non-JSON body or an invalid/unknown field
- * with 400.
+ * `PATCH /x/plugins/meeting-bot/settings`: apply a partial update to the
+ * editable fields and return the new view. Rejects a non-JSON body or an
+ * invalid/unknown (i.e. non-editable) field with 400.
  */
 export async function handleSettingsPatch(request: Request): Promise<Response> {
   let raw: unknown;
@@ -46,13 +50,13 @@ export async function handleSettingsPatch(request: Request): Promise<Response> {
     return json({ error: "request body must be valid JSON" }, 400);
   }
 
-  const parsed = AppSettingsUpdateSchema.safeParse(raw);
+  const parsed = ConfigUpdateSchema.safeParse(raw);
   if (!parsed.success) {
     const detail = parsed.error.issues
       .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
       .join("; ");
-    return json({ error: `invalid settings update: ${detail}` }, 400);
+    return json({ error: `invalid config update: ${detail}` }, 400);
   }
 
-  return json(updateAppSettings(pluginConfigPath(), parsed.data));
+  return json(applyConfigUpdate(pluginConfigPath(), parsed.data));
 }
