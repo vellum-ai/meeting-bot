@@ -139,7 +139,13 @@ export const MeetingBotConfigSchema = z
       .boolean()
       .default(false)
       .describe(
-        "Whether the bot speaks its responses back into the meeting (voice mode). Editable from the configuration app. Not yet consumed by the join / voice-response paths.",
+        "How the bot's voice responses are produced: when true, use the host's new `createLiveVoiceConnection` live-voice API; when false (default), use the existing text-to-speech + Recall `output_audio` path. Temporary flag until `createLiveVoiceConnection` is stable enough to rely on full time, at which point this config is removed. Editable from the configuration app.",
+      ),
+    outputAudio: z
+      .boolean()
+      .default(false)
+      .describe(
+        "When true, the bot may output audio (speak) in the meeting; when false (default), it only listens and transcribes. Defined for a future change and not consumed yet.",
       ),
     provider: z
       .enum(MEETING_PROVIDERS)

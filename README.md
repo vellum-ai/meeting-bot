@@ -88,8 +88,8 @@ Settings persist to the plugin's `config.json` (the same host-owned config the
 `init` hook reads); an edit merges into that file, preserving other fields. The
 `GET`/`PATCH` view omits `verificationToken` so the realtime shared secret is
 never sent to the browser. Meeting history is read from `data/sessions.json`.
-Nothing consumes the editable fields to change behavior yet; a later change
-wires them into the join / voice-response paths.
+`region` selects the Recall region; `useVoiceMode` selects the voice-response
+API (see Behavior flags below) and `provider` is defined but not yet consumed.
 
 ## Configuration
 
@@ -118,6 +118,19 @@ Notable optional fields: `region` (default `us-east-1`), `listenHost` /
 (shared secret appended as `?token=…` and checked on each connection),
 `events` (which realtime events to subscribe to), and `transcript.*`
 (streaming provider settings).
+
+### Behavior flags
+
+- `useVoiceMode` (default `false`): selects how the bot's voice responses are
+  produced. When true, use the host's new `createLiveVoiceConnection` live-voice
+  API; when false, use the existing text-to-speech + Recall `output_audio` path.
+  This is a temporary flag until `createLiveVoiceConnection` is stable enough to
+  rely on full time, after which the config is removed. The
+  `createLiveVoiceConnection` path is not wired yet (pending that API landing in
+  `@vellumai/plugin-api`), so every response currently uses the TTS path.
+- `outputAudio` (default `false`): reserved for a future change. When true the
+  bot may output audio (speak) in the meeting; when false it only listens and
+  transcribes. Defined but not consumed yet.
 
 ### Local development
 

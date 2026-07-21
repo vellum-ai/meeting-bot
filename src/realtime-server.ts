@@ -589,9 +589,11 @@ function bufferTranscript(
  * IDENTITY.md / SOUL.md, default-plugin injections) instead of a stateless
  * one-shot LLM call.
  *
- * After the turn responds, the response text is synthesized to speech via
- * the plugin-api TTS handle and sent to Recall's `output_audio` endpoint
- * so the bot speaks the response into the live meeting.
+ * After the turn responds, the response text is synthesized to speech via the
+ * plugin-api TTS handle and sent to Recall's `output_audio` endpoint so the bot
+ * speaks the response into the live meeting. (The `useVoiceMode` flag will
+ * later switch this to the host's `createLiveVoiceConnection` API; see the TODO
+ * below.)
  *
  * Errors are logged but never thrown — a failed flush must not crash the
  * realtime receiver.
@@ -650,6 +652,11 @@ async function flushTranscriptBuffer(
       { botId, conversationId: result.conversationId },
       "meeting-bot: transcript flush — conversation turn complete",
     );
+
+    // TODO(useVoiceMode): when config.useVoiceMode is set, produce the voice
+    // response via the host's createLiveVoiceConnection live-voice API instead
+    // of the text-to-speech path below. That API is not yet exported from
+    // @vellumai/plugin-api, so for now every response uses the TTS path.
 
     // Synthesize the response text to speech via the plugin-api TTS handle,
     // which uses the assistant's globally configured TTS provider.
