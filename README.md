@@ -1,15 +1,16 @@
 # meeting-bot
 
-A Vellum Assistant plugin that sends a note-taking bot into a meeting via
-[Recall.ai](https://recall.ai). Recall drives the browser and joins the call
-(Google Meet, Zoom, Teams, Webex, …); the plugin stands up a realtime
-WebSocket receiver that Recall streams live transcript and participant events
-into.
+A Vellum Assistant plugin that sends a note-taking bot into a meeting. Two
+providers are supported, selected by the `provider` config field:
 
-This is the Recall-backed parallel track to the browser-extension-based
-[`meet-join`](https://github.com/vellum-ai/meet-join) plugin. Where `meet-join`
-runs its own containerized browser bot, `meeting-bot` offloads joining and
-media capture to Recall and focuses on the realtime event pipe.
+- **`recall`** (default) — [Recall.ai](https://recall.ai) drives the browser
+  and joins the call (Google Meet, Zoom, Teams, Webex, …); the plugin stands
+  up a realtime WebSocket receiver that Recall streams live transcript and
+  participant events into.
+- **`vellum`** — the in-house Meet bot (vendored from the former `meet-join`
+  plugin into [`meet/`](meet/AGENTS.md)) joins Google Meet with its own
+  containerized Chromium + controller extension and streams events through a
+  local ingress into the same session store and transcript pipeline.
 
 ## Architecture
 
@@ -54,6 +55,21 @@ to the in-memory session store that tools read. This isolates the
 connection-handling hot path from the daemon's event loop. The subprocess is
 visible in the assistant's process tree (`assistant ps`).
 
+### The vellum provider
+
+With `provider: "vellum"`, the init hook skips the Recall receiver and stands
+up the vendored meet-join runtime instead: a Docker-or-direct bot backend
+probe, an ingress listener subprocess the bot POSTs events to, and the meet
+session manager that spawns and supervises one bot per meeting. Bot transcript
+chunks, participant changes, and lifecycle transitions are adapted into the
+same session store and debounced transcript flush the Recall path uses, so
+everything downstream (meeting history, conversation turns) is
+provider-agnostic. The join/leave skill scripts detect the provider from the
+resolved config and command the runtime over a token-authenticated local
+control endpoint (`data/vellum-control.json`). See
+[`meet/AGENTS.md`](meet/AGENTS.md) for the vendored tree's layout, the bot
+image build, and which meet-join sub-modules are disabled.
+
 ## Tools
 
 - **`meeting_bot_join`** — create a bot and send it to a meeting URL.
@@ -89,7 +105,8 @@ Settings persist to the plugin's `config.json` (the same host-owned config the
 `GET`/`PATCH` view omits `verificationToken` so the realtime shared secret is
 never sent to the browser. Meeting history is read from `data/sessions.json`.
 `region` selects the Recall region; `useVoiceMode` selects the voice-response
-API (see Behavior flags below) and `provider` is defined but not yet consumed.
+API (see Behavior flags below) and `provider` selects the meeting provider
+(picked up on the next plugin reload).
 
 ## Configuration
 

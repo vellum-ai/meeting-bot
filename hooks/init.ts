@@ -30,6 +30,7 @@ import { resolveAssistantName } from "../src/identity.ts";
 import { setupInbound } from "../src/inbound.ts";
 import { setAssistantName, setResolvedConfig } from "../src/plugin-state.ts";
 import { startRealtimeServer } from "../src/realtime-server.ts";
+import { initVellumMeetRuntime } from "../src/vellum-meet.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -73,6 +74,23 @@ const init = async (ctx: InitContext): Promise<void> => {
       {},
       "meeting-bot: no assistant name found in IDENTITY.md — bots will use the Recall workspace default name",
     );
+  }
+
+  // Provider switch: the vellum provider runs the in-house meet bot (the
+  // vendored meet-join subsystem under meet/); the default recall provider
+  // uses Recall.ai with the realtime WebSocket receiver. Everything below the
+  // branch is provider-specific; the config write and identity resolution
+  // above are shared.
+  if (config.provider === "vellum") {
+    try {
+      await initVellumMeetRuntime(ctx, config);
+    } catch (err) {
+      ctx.logger.error(
+        { error: String(err).slice(0, 300) },
+        "meeting-bot: failed to initialize the vellum meet runtime — joins will fail until this is resolved",
+      );
+    }
+    return;
   }
 
   // Surface a missing API-key credential early (non-fatal): the realtime

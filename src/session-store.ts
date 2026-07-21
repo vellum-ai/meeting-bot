@@ -17,9 +17,10 @@ import type {
   NormalizedParticipantEvent,
   NormalizedUtterance,
 } from "./realtime-events.ts";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MeetingBotConfig } from "./config.ts";
+import { pluginDataDir } from "./plugin-paths.ts";
 
 export interface TranscriptLine {
   at: number;
@@ -34,6 +35,12 @@ export interface MeetingSession {
   startedAt: number;
   transcript: TranscriptLine[];
   participants: Map<string, string>;
+  /**
+   * Which provider runs this session's bot. "recall" (default) sessions may
+   * speak via Recall's output_audio; "vellum" sessions are driven by the
+   * in-house meet bot and skip the Recall voice path.
+   */
+  provider?: "recall" | "vellum";
 }
 
 /** Cap the in-memory transcript so a long meeting cannot grow unbounded. */
@@ -45,6 +52,7 @@ export function openSession(
   botId: string,
   meetingUrl: string,
   conversationId: string | null = null,
+  provider: "recall" | "vellum" = "recall",
 ): MeetingSession {
   const session: MeetingSession = {
     botId,
@@ -53,6 +61,7 @@ export function openSession(
     startedAt: Date.now(),
     transcript: [],
     participants: new Map(),
+    provider,
   };
   sessions.set(botId, session);
   return session;
@@ -142,6 +151,7 @@ export function loadSessionsFromFile(config: MeetingBotConfig): void {
       meetingUrl: string;
       conversationId: string | null;
       startedAt: number;
+      provider?: "recall" | "vellum";
     }>;
 
     for (const fs of fileSessions) {
@@ -155,6 +165,7 @@ export function loadSessionsFromFile(config: MeetingBotConfig): void {
           startedAt: fs.startedAt,
           transcript: [],
           participants: new Map(),
+          provider: fs.provider ?? "recall",
         });
       } else {
         // Update conversationId in case it was set after the session was
@@ -188,6 +199,7 @@ function syncSessionsFromFile(): void {
       meetingUrl: string;
       conversationId: string | null;
       startedAt: number;
+      provider?: "recall" | "vellum";
     }>;
 
     for (const fs of fileSessions) {
@@ -199,6 +211,7 @@ function syncSessionsFromFile(): void {
           startedAt: fs.startedAt,
           transcript: [],
           participants: new Map(),
+          provider: fs.provider ?? "recall",
         });
       } else {
         const existing = sessions.get(fs.botId)!;
@@ -225,4 +238,50 @@ function resolveSession(botId?: string): MeetingSession | undefined {
   if (sessions.size === 0) syncSessionsFromFile();
   if (sessions.size === 1) return [...sessions.values()][0];
   return undefined;
+}
+
+// --- Daemon-side persistence into sessions.json -----------------------------
+//
+// The Recall join script (a standalone bun process) writes sessions.json
+// itself. Vellum-provider joins happen in-daemon (the session manager spawns
+// the bot), so the daemon needs its own writers for the same file to keep the
+// leave script and the dashboard's meeting history working across providers.
+
+/** Shape of one entry in data/sessions.json (matches the skill client's). */
+export interface PersistedSessionEntry {
+  botId: string;
+  meetingUrl: string;
+  conversationId: string | null;
+  startedAt: number;
+  provider?: "recall" | "vellum";
+}
+
+function sessionsFilePath(): string {
+  return join(pluginDataDir(), "sessions.json");
+}
+
+function readPersistedSessions(): PersistedSessionEntry[] {
+  const path = sessionsFilePath();
+  if (!existsSync(path)) return [];
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    return Array.isArray(parsed) ? (parsed as PersistedSessionEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Add (or replace) a session entry in data/sessions.json. */
+export function persistSessionEntry(entry: PersistedSessionEntry): void {
+  mkdirSync(pluginDataDir(), { recursive: true });
+  const entries = readPersistedSessions().filter((e) => e.botId !== entry.botId);
+  entries.push(entry);
+  writeFileSync(sessionsFilePath(), JSON.stringify(entries, null, 2), "utf-8");
+}
+
+/** Remove a session entry from data/sessions.json by bot/meeting id. */
+export function removePersistedSession(botId: string): void {
+  const entries = readPersistedSessions().filter((e) => e.botId !== botId);
+  if (!existsSync(sessionsFilePath())) return;
+  writeFileSync(sessionsFilePath(), JSON.stringify(entries, null, 2), "utf-8");
 }

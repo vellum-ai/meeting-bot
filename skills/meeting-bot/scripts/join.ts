@@ -26,6 +26,7 @@ import {
   getResolvedConfig,
   RecallApiError,
   removeSession,
+  vellumControlPost,
 } from "./meeting-bot-client.ts";
 
 interface Args {
@@ -184,6 +185,30 @@ async function main(): Promise<void> {
   } catch (err) {
     console.error(`Error: ${String(err)}`);
     process.exit(1);
+  }
+
+  // Vellum provider: the join is performed in-daemon by the vellum meet
+  // runtime (the bot subprocess must be supervised by the daemon, not this
+  // short-lived script). Command it over the local control endpoint; the
+  // daemon registers and persists the session itself.
+  if (config.provider === "vellum") {
+    console.error(`Joining ${meetingUrl} via the vellum meet bot...`);
+    try {
+      const result = await vellumControlPost("join", {
+        meetingUrl,
+        conversationId,
+      });
+      const meetingId = String(result.meetingId ?? "");
+      console.log(`Vellum meet bot ${meetingId} is joining ${meetingUrl}.`);
+      console.log(
+        `Live transcript events will stream into the meeting session.`,
+      );
+      console.log(`Use leave.ts with this id to end it: --bot-id ${meetingId}`);
+    } catch (err) {
+      console.error(`Failed to join: ${String(err)}`);
+      process.exit(1);
+    }
+    return;
   }
 
   // Resolve bot name: explicit arg > IDENTITY.md > Recall default

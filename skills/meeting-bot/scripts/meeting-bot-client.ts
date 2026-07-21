@@ -91,6 +91,8 @@ export interface ResolvedConfig {
     languageCode: string;
     mode: string;
   };
+  /** Which provider runs the bot: Recall.ai or the in-house vellum meet bot. */
+  provider?: "recall" | "vellum";
 }
 
 /**
@@ -271,6 +273,63 @@ export interface SessionEntry {
   meetingUrl: string;
   conversationId: string | null;
   startedAt: number;
+  /** Which provider owns this session. Absent means recall (pre-provider entries). */
+  provider?: "recall" | "vellum";
+}
+
+// --- Vellum provider control -----------------------------------------------
+//
+// When config.provider is "vellum", joins and leaves are performed in-daemon
+// by the vellum meet runtime (the bot spawn must be supervised by the daemon,
+// not by this short-lived script). The runtime publishes a local control
+// endpoint in data/vellum-control.json; these helpers call it.
+
+interface VellumControl {
+  port: number;
+  token: string;
+}
+
+/** Read the vellum control endpoint published by the init hook. */
+export function readVellumControl(): VellumControl {
+  const path = join(findPluginDataDir(), "vellum-control.json");
+  if (!existsSync(path)) {
+    throw new Error(
+      "vellum control file not found. The plugin's init hook writes vellum-control.json when config.provider is \"vellum\" — ensure the plugin is loaded with that provider and the daemon is running.",
+    );
+  }
+  const parsed = JSON.parse(readFileSync(path, "utf-8")) as VellumControl;
+  if (typeof parsed.port !== "number" || typeof parsed.token !== "string") {
+    throw new Error("vellum-control.json is malformed (expected { port, token })");
+  }
+  return parsed;
+}
+
+/** POST a control command to the vellum meet runtime. */
+export async function vellumControlPost(
+  path: "join" | "leave",
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const control = readVellumControl();
+  const res = await fetch(`http://127.0.0.1:${control.port}/control/${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${control.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    // non-JSON error body; surfaced below
+  }
+  if (!res.ok) {
+    const detail = typeof parsed.error === "string" ? parsed.error : text.slice(0, 300);
+    throw new Error(`vellum ${path} failed (${res.status}): ${detail}`);
+  }
+  return parsed;
 }
 
 /** Read all sessions from the sessions file. Returns an empty array if the file does not exist. */

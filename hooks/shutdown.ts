@@ -16,6 +16,7 @@ import type { ShutdownContext } from "@vellumai/plugin-api";
 import { teardownInbound } from "../src/inbound.ts";
 import type { Logger } from "../src/realtime-server.ts";
 import { stopRealtimeServer } from "../src/realtime-server.ts";
+import { shutdownVellumMeetRuntime } from "../src/vellum-meet.ts";
 
 const noopLogger: Logger = {
   info: () => {},
@@ -25,6 +26,9 @@ const noopLogger: Logger = {
 };
 
 const shutdown = async (_ctx: ShutdownContext): Promise<void> => {
+  // Vellum-provider teardown (safe no-op when the runtime never started):
+  // active meet sessions leave, then the ingress listener stops.
+  await shutdownVellumMeetRuntime("plugin shutdown");
   await stopRealtimeServer();
   // ShutdownContext does not carry a logger, so use a noop logger for
   // tunnel teardown — the tunnel process is being killed anyway.
