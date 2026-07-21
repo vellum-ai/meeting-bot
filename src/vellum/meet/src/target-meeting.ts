@@ -36,5 +36,5 @@ export function resolveTargetMeetingId(
       content: `Error: multiple active Meet sessions (${ids}). Pass meetingId explicitly.`,
     };
   }
-  return { ok: true, meetingId: active[0].meetingId };
+  return { ok: true, meetingId: active[0]!.meetingId };
 }

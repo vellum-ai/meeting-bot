@@ -1,25 +1,17 @@
 /**
- * Tests for the vellum provider's event adapter: meet-bot events piped into
- * meeting-bot's session store, and the control handlers' guard behavior when
- * the runtime is not initialized.
+ * Tests for the Vellum Runtime's daemon-side event adapter (meet-bot events
+ * piped into meeting-bot's session store) and the Meet URL validation the
+ * subprocess control server applies to joins.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import type { MeetBotEvent } from "../../meet/contracts/index.ts";
-import { clearTranscriptBuffer } from "../realtime-server.ts";
-import {
-  closeSession,
-  getSession,
-  openSession,
-} from "../session-store.ts";
-import {
-  handleVellumJoin,
-  handleVellumLeave,
-  handleVellumMeetEvent,
-  MEET_URL_REGEX,
-} from "../vellum-meet.ts";
 import { MeetingBotConfigSchema, type MeetingBotConfig } from "../config.ts";
+import { clearTranscriptBuffer } from "../realtime-server.ts";
+import { closeSession, getSession, openSession } from "../session-store.ts";
+import type { MeetBotEvent } from "../vellum/meet/contracts/index.ts";
+import { handleVellumMeetEvent } from "../vellum/runtime.ts";
+import { MEET_URL_REGEX } from "../vellum/subprocess.ts";
 
 const noopLogger = {
   info: () => {},
@@ -38,7 +30,9 @@ function opts() {
   return { logger: noopLogger, config: makeConfig() };
 }
 
-function transcriptEvent(overrides: Partial<Extract<MeetBotEvent, { type: "transcript.chunk" }>> = {}): MeetBotEvent {
+function transcriptEvent(
+  overrides: Partial<Extract<MeetBotEvent, { type: "transcript.chunk" }>> = {},
+): MeetBotEvent {
   return {
     type: "transcript.chunk",
     meetingId: MEETING_ID,
@@ -130,8 +124,6 @@ describe("handleVellumMeetEvent", () => {
       opts(),
     );
 
-    // The in-memory session is gone (getSession may re-sync from a sessions
-    // file; none exists in the test environment).
     expect(getSession(MEETING_ID)).toBeUndefined();
   });
 
@@ -165,28 +157,6 @@ describe("handleVellumMeetEvent", () => {
     const session = getSession(MEETING_ID)!;
     expect(session.transcript).toHaveLength(0);
     expect(session.participants.size).toBe(0);
-  });
-});
-
-describe("control handlers without a runtime", () => {
-  test("join returns 503 when the vellum runtime is not initialized", async () => {
-    const res = await handleVellumJoin(
-      new Request("http://x/control/join", {
-        method: "POST",
-        body: JSON.stringify({ meetingUrl: "https://meet.google.com/abc-defg-hij" }),
-      }),
-    );
-    expect(res.status).toBe(503);
-  });
-
-  test("leave returns 503 when the vellum runtime is not initialized", async () => {
-    const res = await handleVellumLeave(
-      new Request("http://x/control/leave", {
-        method: "POST",
-        body: JSON.stringify({ meetingId: "m1" }),
-      }),
-    );
-    expect(res.status).toBe(503);
   });
 });
 

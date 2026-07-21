@@ -26,23 +26,31 @@ import {
 /** The resolved config the app displays: everything except the shared secret. */
 export type ConfigView = Omit<MeetingBotConfig, "verificationToken">;
 
-/** Partial update accepted by the settings PATCH route (the editable fields). */
+/**
+ * Partial update accepted by the settings PATCH route (the editable fields).
+ * `provider` is deliberately NOT here: switching providers has side effects
+ * (runtime teardown/startup) beyond a config write, so it goes through its
+ * own dedicated route ({@link applyProviderChange}); a PATCH carrying
+ * `provider` is rejected with 400 like any other non-editable field.
+ */
 export const ConfigUpdateSchema = z
   .object({
     useVoiceMode: z.boolean().optional(),
-    provider: z.enum(MEETING_PROVIDERS).optional(),
     region: z.enum(RECALL_REGIONS).optional(),
   })
   .strict();
 
 export type ConfigUpdate = z.infer<typeof ConfigUpdateSchema>;
 
-/** The config keys the app renders as editable, in display order. */
-export const EDITABLE_CONFIG_KEYS = [
-  "useVoiceMode",
-  "provider",
-  "region",
-] as const;
+/** The config keys the app renders as editable via PATCH, in display order. */
+export const EDITABLE_CONFIG_KEYS = ["useVoiceMode", "region"] as const;
+
+/** Body accepted by the dedicated provider-change route. */
+export const ProviderChangeSchema = z
+  .object({ provider: z.enum(MEETING_PROVIDERS) })
+  .strict();
+
+export type ProviderChange = z.infer<typeof ProviderChangeSchema>;
 
 /**
  * Parse `config.json` into a plain object. Returns `{}` when the file is
@@ -85,8 +93,25 @@ export function applyConfigUpdate(
 ): ConfigView {
   const obj = readConfigObject(configPath);
   if (update.useVoiceMode !== undefined) obj.useVoiceMode = update.useVoiceMode;
-  if (update.provider !== undefined) obj.provider = update.provider;
   if (update.region !== undefined) obj.region = update.region;
+  writeFileSync(configPath, `${JSON.stringify(obj, null, 2)}\n`, "utf-8");
+  return readConfigView(configPath);
+}
+
+/**
+ * Persist a provider change into `config.json` (merging like
+ * {@link applyConfigUpdate}). Kept separate from the settings PATCH because a
+ * provider switch carries side effects beyond the write: today it takes
+ * effect on the next plugin reload (recall realtime receiver vs the Vellum
+ * Runtime subprocess); future changes will trigger runtime switchover and
+ * other side effects from the dedicated route that calls this.
+ */
+export function applyProviderChange(
+  configPath: string,
+  change: ProviderChange,
+): ConfigView {
+  const obj = readConfigObject(configPath);
+  obj.provider = change.provider;
   writeFileSync(configPath, `${JSON.stringify(obj, null, 2)}\n`, "utf-8");
   return readConfigView(configPath);
 }

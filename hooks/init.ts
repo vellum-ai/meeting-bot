@@ -30,7 +30,7 @@ import { resolveAssistantName } from "../src/identity.ts";
 import { setupInbound } from "../src/inbound.ts";
 import { setAssistantName, setResolvedConfig } from "../src/plugin-state.ts";
 import { startRealtimeServer } from "../src/realtime-server.ts";
-import { initVellumMeetRuntime } from "../src/vellum-meet.ts";
+import { initVellumRuntime } from "../src/vellum/runtime.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -76,18 +76,18 @@ const init = async (ctx: InitContext): Promise<void> => {
     );
   }
 
-  // Provider switch: the vellum provider runs the in-house meet bot (the
-  // vendored meet-join subsystem under meet/); the default recall provider
-  // uses Recall.ai with the realtime WebSocket receiver. Everything below the
-  // branch is provider-specific; the config write and identity resolution
-  // above are shared.
+  // Provider switch: the vellum provider runs the Vellum Runtime (the
+  // vendored subsystem under src/vellum/meet, supervised as its own
+  // subprocess); the default recall provider uses Recall.ai with the realtime
+  // WebSocket receiver. Everything below the branch is provider-specific; the
+  // config write and identity resolution above are shared.
   if (config.provider === "vellum") {
     try {
-      await initVellumMeetRuntime(ctx, config);
+      await initVellumRuntime(ctx, config);
     } catch (err) {
       ctx.logger.error(
         { error: String(err).slice(0, 300) },
-        "meeting-bot: failed to initialize the vellum meet runtime — joins will fail until this is resolved",
+        "meeting-bot: failed to initialize the Vellum Runtime: joins will fail until this is resolved",
       );
     }
     return;

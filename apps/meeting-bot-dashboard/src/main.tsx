@@ -104,7 +104,6 @@ function Configuration() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           useVoiceMode: config.useVoiceMode,
-          provider: config.provider,
           region: config.region,
         }),
       });
@@ -119,6 +118,35 @@ function Configuration() {
     } finally {
       setSaving(false);
       setTimeout(() => setStatus(""), 2500);
+    }
+  }
+
+  // The provider switch goes through its own route (it has side effects
+  // beyond a config write) and applies immediately on selection.
+  async function switchProvider(provider: Provider) {
+    if (!config) return;
+    const previous = config.provider;
+    setConfig({ ...config, provider });
+    setStatus("Switching provider...");
+    try {
+      const res = await vfetch(`${BASE}/provider`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        setConfig(body);
+        setStatus(body.note || "Provider switched");
+      } else {
+        setConfig({ ...config, provider: previous });
+        setStatus("Provider switch failed");
+      }
+    } catch {
+      setConfig({ ...config, provider: previous });
+      setStatus("Provider switch failed");
+    } finally {
+      setTimeout(() => setStatus(""), 4000);
     }
   }
 
@@ -146,9 +174,7 @@ function Configuration() {
               <select
                 id="provider"
                 value={config.provider}
-                onChange={(e) =>
-                  setConfig({ ...config, provider: e.target.value as Provider })
-                }
+                onChange={(e) => void switchProvider(e.target.value as Provider)}
               >
                 <option value="recall">Recall</option>
                 <option value="vellum">Vellum</option>

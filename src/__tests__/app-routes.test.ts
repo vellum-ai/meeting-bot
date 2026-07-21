@@ -13,6 +13,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   handleMeetingsGet,
+  handleProviderPost,
   handleSettingsGet,
   handleSettingsPatch,
 } from "../app-routes.ts";
@@ -47,8 +48,10 @@ describe("handleSettingsGet", () => {
 });
 
 describe("handleSettingsPatch validation", () => {
-  test("rejects an invalid provider with 400", async () => {
-    const res = await handleSettingsPatch(patch(JSON.stringify({ provider: "zoom" })));
+  test("rejects a provider change with 400 (its own route owns that)", async () => {
+    // Switching providers has side effects beyond a config write, so the
+    // settings PATCH must not accept it.
+    const res = await handleSettingsPatch(patch(JSON.stringify({ provider: "vellum" })));
     expect(res.status).toBe(400);
   });
 
@@ -72,6 +75,36 @@ describe("handleSettingsPatch validation", () => {
 
   test("rejects a non-JSON body with 400", async () => {
     const res = await handleSettingsPatch(patch("not json"));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("handleProviderPost validation", () => {
+  // Only the reject paths run here: a valid switch writes the plugin's real
+  // config.json, and the value-precise write behavior is covered against
+  // temp files in app-settings.test.ts (applyProviderChange).
+  function providerPost(body: string): Request {
+    return new Request("http://x/x/plugins/meeting-bot/provider", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+  }
+
+  test("rejects an unknown provider with 400", async () => {
+    const res = await handleProviderPost(providerPost(JSON.stringify({ provider: "zoom" })));
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects extra fields with 400", async () => {
+    const res = await handleProviderPost(
+      providerPost(JSON.stringify({ provider: "vellum", region: "us-west-2" })),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects a non-JSON body with 400", async () => {
+    const res = await handleProviderPost(providerPost("not json"));
     expect(res.status).toBe(400);
   });
 });

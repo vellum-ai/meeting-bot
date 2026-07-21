@@ -1,6 +1,8 @@
 # Scope the default `bun test` run to the plugin's own suites. The vendored
-# meet-join subsystem under meet/ carries its own tests (including Docker and
-# live-meeting e2e suites that need a browser stack); run those explicitly with
-# `bun test meet/...` when working on the vendored code.
+# Vellum Runtime tree under src/vellum/meet carries its own tests (including
+# Docker and live-meeting e2e suites that need a browser stack); run those
+# explicitly with `bun test src/vellum/meet/...` when working on that tree.
+# TODO: fold the vendored suites that can run hermetically into this default
+# run so one `bun test` covers everything.
 [test]
-root = "src"
+root = "src/__tests__"

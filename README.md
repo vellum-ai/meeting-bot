@@ -1,16 +1,19 @@
 # meeting-bot
 
-A Vellum Assistant plugin that sends a note-taking bot into a meeting. Two
-providers are supported, selected by the `provider` config field:
+A Vellum Assistant plugin that sends the assistant itself into a meeting: it
+joins the call as a participant, listens and transcribes, feeds the live
+transcript into the conversation, and (as the voice path matures) speaks
+back. Two providers are supported, selected by the `provider` config field:
 
 - **`recall`** (default) — [Recall.ai](https://recall.ai) drives the browser
   and joins the call (Google Meet, Zoom, Teams, Webex, …); the plugin stands
   up a realtime WebSocket receiver that Recall streams live transcript and
   participant events into.
-- **`vellum`** — the in-house Meet bot (vendored from the former `meet-join`
-  plugin into [`meet/`](meet/AGENTS.md)) joins Google Meet with its own
-  containerized Chromium + controller extension and streams events through a
-  local ingress into the same session store and transcript pipeline.
+- **`vellum`**: the Vellum Runtime
+  ([`src/vellum/`](src/vellum/meet/AGENTS.md)) joins with its own
+  containerized Chromium + controller extension and streams events into the
+  same session store and transcript pipeline. Google Meet is its first
+  adapter; other video-call platforms will slot in behind the same runtime.
 
 ## Architecture
 
@@ -55,20 +58,25 @@ to the in-memory session store that tools read. This isolates the
 connection-handling hot path from the daemon's event loop. The subprocess is
 visible in the assistant's process tree (`assistant ps`).
 
-### The vellum provider
+### The Vellum Runtime (`provider: "vellum"`)
 
-With `provider: "vellum"`, the init hook skips the Recall receiver and stands
-up the vendored meet-join runtime instead: a Docker-or-direct bot backend
-probe, an ingress listener subprocess the bot POSTs events to, and the meet
-session manager that spawns and supervises one bot per meeting. Bot transcript
-chunks, participant changes, and lifecycle transitions are adapted into the
-same session store and debounced transcript flush the Recall path uses, so
-everything downstream (meeting history, conversation turns) is
-provider-agnostic. The join/leave skill scripts detect the provider from the
-resolved config and command the runtime over a token-authenticated local
-control endpoint (`data/vellum-control.json`). See
-[`meet/AGENTS.md`](meet/AGENTS.md) for the vendored tree's layout, the bot
-image build, and which meet-join sub-modules are disabled.
+With `provider: "vellum"`, the init hook skips the Recall receiver and spawns
+the Vellum Runtime as its own subprocess (`src/vellum/subprocess.ts`,
+supervised by `src/vellum/runtime.ts`): the same isolation the Recall
+receiver gets, so bot supervision and event ingress never run on the daemon's
+event loop. Inside the subprocess live the Docker-or-direct bot backend
+probe, the ingress listener the bot POSTs events to, the meet session manager
+that spawns one bot per meeting, and a loopback control server. Bot
+transcript chunks, participant changes, and lifecycle transitions are relayed
+to the daemon over stdio and adapted into the same session store and
+debounced transcript flush the Recall path uses, so everything downstream
+(meeting history, conversation turns) is provider-agnostic. The join/leave
+skill scripts detect the provider from the resolved config and command the
+runtime over its loopback control endpoint (port published in
+`data/vellum-control.json`; internal-only, so no token). See
+[`src/vellum/meet/AGENTS.md`](src/vellum/meet/AGENTS.md) for the vendored
+tree's layout, the bot image build, and which meet-join sub-modules are
+disabled.
 
 ## Tools
 
@@ -90,15 +98,18 @@ host into `dist/`). It calls the plugin's routes, served under
 | `GET /x/plugins/meeting-bot/meetings`    | Meeting history as JSON (newest first).       |
 | `GET /x/plugins/meeting-bot/settings`    | The resolved config for display, as JSON.     |
 | `PATCH /x/plugins/meeting-bot/settings`  | Update the editable fields; returns the view. |
+| `POST /x/plugins/meeting-bot/provider`   | Switch the meeting provider (side-effectful). |
 
-The app shows the whole config. Three fields are editable; the rest are shown
-read-only.
+The app shows the whole config. Two fields are editable via the settings
+PATCH; the provider is switched through its own dedicated route
+(`POST /x/plugins/meeting-bot/provider`) because a provider change carries
+side effects beyond a config write. The rest is shown read-only.
 
-| Editable field | Type                       | Default     |
-| -------------- | -------------------------- | ----------- |
-| `useVoiceMode` | boolean                    | `false`     |
-| `provider`     | enum (`recall` / `vellum`) | `recall`    |
-| `region`       | enum (Recall regions)      | `us-east-1` |
+| Editable field | Type                       | Default     | Via              |
+| -------------- | -------------------------- | ----------- | ---------------- |
+| `useVoiceMode` | boolean                    | `false`     | `PATCH /settings`|
+| `region`       | enum (Recall regions)      | `us-east-1` | `PATCH /settings`|
+| `provider`     | enum (`recall` / `vellum`) | `recall`    | `POST /provider` |
 
 Settings persist to the plugin's `config.json` (the same host-owned config the
 `init` hook reads); an edit merges into that file, preserving other fields. The
@@ -106,7 +117,7 @@ Settings persist to the plugin's `config.json` (the same host-owned config the
 never sent to the browser. Meeting history is read from `data/sessions.json`.
 `region` selects the Recall region; `useVoiceMode` selects the voice-response
 API (see Behavior flags below) and `provider` selects the meeting provider
-(picked up on the next plugin reload).
+(applied via its own route; picked up on the next plugin reload).
 
 ## Configuration
 
