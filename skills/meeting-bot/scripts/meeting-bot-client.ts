@@ -277,45 +277,42 @@ export interface SessionEntry {
   provider?: "recall" | "vellum";
 }
 
-// --- Vellum provider control -----------------------------------------------
+// --- Vellum Runtime control --------------------------------------------------
 //
-// When config.provider is "vellum", joins and leaves are performed in-daemon
-// by the vellum meet runtime (the bot spawn must be supervised by the daemon,
-// not by this short-lived script). The runtime publishes a local control
-// endpoint in data/vellum-control.json; these helpers call it.
+// When config.provider is "vellum", joins and leaves are performed by the
+// Vellum Runtime subprocess (the bot spawn must be supervised there, not by
+// this short-lived script). The runtime publishes its loopback control port
+// in data/vellum-control.json; the endpoint is internal-only (127.0.0.1,
+// daemon-supervised), so requests carry no token.
 
 interface VellumControl {
   port: number;
-  token: string;
 }
 
-/** Read the vellum control endpoint published by the init hook. */
+/** Read the Vellum Runtime control endpoint published at plugin init. */
 export function readVellumControl(): VellumControl {
   const path = join(findPluginDataDir(), "vellum-control.json");
   if (!existsSync(path)) {
     throw new Error(
-      "vellum control file not found. The plugin's init hook writes vellum-control.json when config.provider is \"vellum\" — ensure the plugin is loaded with that provider and the daemon is running.",
+      "vellum control file not found. The plugin writes vellum-control.json when config.provider is \"vellum\": ensure the plugin is loaded with that provider and the daemon is running.",
     );
   }
   const parsed = JSON.parse(readFileSync(path, "utf-8")) as VellumControl;
-  if (typeof parsed.port !== "number" || typeof parsed.token !== "string") {
-    throw new Error("vellum-control.json is malformed (expected { port, token })");
+  if (typeof parsed.port !== "number") {
+    throw new Error("vellum-control.json is malformed (expected { port })");
   }
   return parsed;
 }
 
-/** POST a control command to the vellum meet runtime. */
+/** POST a control command to the Vellum Runtime. */
 export async function vellumControlPost(
   path: "join" | "leave",
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const control = readVellumControl();
-  const res = await fetch(`http://127.0.0.1:${control.port}/control/${path}`, {
+  const res = await fetch(`http://127.0.0.1:${control.port}/${path}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${control.token}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   const text = await res.text();

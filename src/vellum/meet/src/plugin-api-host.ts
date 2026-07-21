@@ -13,40 +13,44 @@
  *
  * Facets fall into three bands:
  *
- * - **Fully backed** — `logger` (wraps the init-context logger),
- *   `events` (assistant event hub facade + a locally built envelope), and
- *   `platform` (workspace dir from `VELLUM_WORKSPACE_DIR` or derived from
- *   the plugin storage dir; runtime mode from `IS_CONTAINERIZED`).
+ * - **Fully backed** — `logger` (wraps the init-context logger), `events`
+ *   (assistant event hub facade + a locally built envelope), `platform`
+ *   (workspace dir from `VELLUM_WORKSPACE_DIR` or derived from the plugin
+ *   storage dir; runtime mode from `IS_CONTAINERIZED`),
+ *   `memory.addMessage` (plugin-api `addMessage`),
+ *   `identity.getAssistantName` (plugin-api `getAssistantName`),
+ *   `providers.llm.getConfigured` (plugin-api `getConfiguredProvider`),
+ *   and `providers.secureKeys.getProviderKey` (plugin-api
+ *   `resolveCredential` on `<provider>/api_key`).
  *
  * - **Gracefully degraded** — facets whose contracts have a documented
- *   "unavailable" value: `providers.llm.getConfigured` → `null`,
+ *   "unavailable" value and no plugin-api equivalent yet:
  *   `providers.stt.resolveStreamingTranscriber` → `null`,
- *   `providers.secureKeys.getProviderKey` → `null`,
- *   `identity.getAssistantName` → `undefined`, `config.getSection` →
- *   `undefined`, `speakers.createTracker` → `undefined` (the speaker
- *   resolver falls back to its NOOP tracker), and `memory.*` → logged
- *   no-ops. Nothing registers through the host: the loader discovers
- *   tools from `tools/*.ts` default exports, and `routes/` files follow
- *   the assistant's file-based convention (file path = route path, HTTP
- *   method as named export — served by the plugin's own listener until
- *   the assistant auto-registers them). Each degradation logs a warning
- *   once per capability.
+ *   `config.getSection` → `undefined`, `speakers.createTracker` →
+ *   `undefined` (the speaker resolver falls back to its NOOP tracker), and
+ *   `memory.wakeAgentForOpportunity` → logged no-op. Each degradation logs
+ *   a warning once per capability.
  *
  * - **Unsupported** — calls with no graceful value (`providers.tts.*`,
- *   `providers.llm.userMessage` / `extractToolUse`, `platform.vellumRoot`)
- *   throw {@link MeetHostCapabilityError} with an actionable message.
+ *   `providers.llm.userMessage`, `platform.vellumRoot`) throw
+ *   {@link MeetHostCapabilityError} with an actionable message.
  *
- * Degraded/unsupported facets are the ones with no `@vellumai/plugin-api`
- * equivalent yet (STT, TTS, secure keys, memory, speakers, identity).
- * Each is a candidate for its own plugin-api facet; this bridge shrinks
- * as those land.
+ * The remaining degraded/unsupported facets (STT, TTS, speakers, agent
+ * wake-ups) are candidates for their own plugin-api facets; this bridge
+ * keeps shrinking as those land.
  */
 
 import { randomUUID } from "node:crypto";
 import { basename, dirname } from "node:path";
 
 import type { InitContext } from "@vellumai/plugin-api";
-import { assistantEventHub } from "@vellumai/plugin-api";
+import {
+  addMessage,
+  assistantEventHub,
+  getAssistantName,
+  getConfiguredProvider,
+  resolveCredential,
+} from "@vellumai/plugin-api";
 
 import type {
   AssistantEvent,
@@ -162,13 +166,8 @@ export function createPluginApiHost(ctx: InitContext): SkillHost {
     },
 
     identity: {
-      getAssistantName: (): string | undefined => {
-        warnOnce(
-          "identity.getAssistantName",
-          "assistant display name unavailable - using the configured joinName or the built-in default",
-        );
-        return undefined;
-      },
+      // Backed by the real plugin-api export (reads IDENTITY.md host-side).
+      getAssistantName: (): string | undefined => getAssistantName() ?? undefined,
     },
 
     platform: {
@@ -183,12 +182,16 @@ export function createPluginApiHost(ctx: InitContext): SkillHost {
 
     providers: {
       llm: {
-        getConfigured: async () => {
-          warnOnce(
-            "providers.llm.getConfigured",
-            "LLM call-sites unavailable - consent monitoring and chat-opportunity detection are disabled",
-          );
-          return null;
+        // Backed by the real plugin-api call-site resolver. Callers treat a
+        // null as "LLM unavailable" and degrade, same as before.
+        getConfigured: async (callSite: string) => {
+          try {
+            return await getConfiguredProvider(
+              callSite as Parameters<typeof getConfiguredProvider>[0],
+            );
+          } catch {
+            return null;
+          }
         },
         // Only reachable after a non-null `getConfigured`, which never
         // happens through this bridge.
@@ -228,24 +231,24 @@ export function createPluginApiHost(ctx: InitContext): SkillHost {
         },
       },
       secureKeys: {
+        // Backed by the plugin-api credential resolver; provider keys live in
+        // the secure store under `<provider>/api_key`. Absent keys resolve to
+        // null, preserving the facet's documented degraded value.
         getProviderKey: async (id: string) => {
-          warnOnce(
-            "providers.secureKeys.getProviderKey",
-            `provider API keys unavailable (requested "${id}")`,
-          );
-          return null;
+          try {
+            const value = (await resolveCredential(`${id}/api_key`)).trim();
+            return value.length > 0 ? value : null;
+          } catch {
+            return null;
+          }
         },
       },
     },
 
     memory: {
-      addMessage: async (conversationId: string) => {
-        warnOnce(
-          "memory.addMessage",
-          `transcript messages cannot be persisted to conversations (conversation "${conversationId}") - meeting events still flow to connected clients`,
-        );
-        return undefined;
-      },
+      // Backed by the real plugin-api conversation insert.
+      addMessage: async (conversationId, role, content, options) =>
+        addMessage(conversationId, role, content, options),
       wakeAgentForOpportunity: async () => {
         warnOnce(
           "memory.wakeAgentForOpportunity",

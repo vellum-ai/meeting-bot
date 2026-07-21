@@ -10,7 +10,9 @@
 
 import {
   applyConfigUpdate,
+  applyProviderChange,
   ConfigUpdateSchema,
+  ProviderChangeSchema,
   readConfigView,
 } from "./app-settings.ts";
 import { readMeetingHistory } from "./meeting-history.ts";
@@ -59,4 +61,34 @@ export async function handleSettingsPatch(request: Request): Promise<Response> {
   }
 
   return json(applyConfigUpdate(pluginConfigPath(), parsed.data));
+}
+
+/**
+ * `POST /x/plugins/meeting-bot/provider`: switch the meeting provider. Its
+ * own route (not part of the settings PATCH) because a provider change
+ * carries side effects beyond the config write; today the switch takes
+ * effect on the next plugin reload, and future side effects (live runtime
+ * switchover) hang off this handler.
+ */
+export async function handleProviderPost(request: Request): Promise<Response> {
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return json({ error: "request body must be valid JSON" }, 400);
+  }
+
+  const parsed = ProviderChangeSchema.safeParse(raw);
+  if (!parsed.success) {
+    return json(
+      { error: "provider must be one of 'recall' or 'vellum'" },
+      400,
+    );
+  }
+
+  const view = applyProviderChange(pluginConfigPath(), parsed.data);
+  return json({
+    ...view,
+    note: "provider change takes effect on the next plugin reload",
+  });
 }

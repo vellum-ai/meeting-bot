@@ -205,7 +205,7 @@ function parseBearerToken(header: string | null): string | null {
   if (!header) return null;
   const match = header.match(/^\s*Bearer\s+(\S+)\s*$/i);
   if (!match) return null;
-  return match[1];
+  return match[1] ?? null;
 }
 
 /**

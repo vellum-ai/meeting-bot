@@ -154,7 +154,32 @@ export const MeetingBotConfigSchema = z
       .enum(MEETING_PROVIDERS)
       .default("recall")
       .describe(
-        "Which meeting provider the bot uses: 'recall' (Recall.ai, the default) or 'vellum' (the in-house meet bot). Selected at plugin load; editable from the configuration app and picked up on the next reload.",
+        "Which meeting provider the bot uses: 'recall' (Recall.ai, the default) or 'vellum' (the Vellum Runtime). Changed via the dedicated provider route, not the settings PATCH; picked up on the next plugin reload.",
+      ),
+    meet: z
+      .object({
+        joinName: z
+          .string()
+          .optional()
+          .describe(
+            "Display name the Vellum Runtime bot uses when joining. Defaults to the assistant's display name from IDENTITY.md.",
+          ),
+        consentMessage: z
+          .string()
+          .optional()
+          .describe(
+            "Message the Vellum Runtime bot posts in meeting chat on join. `{assistantName}` is substituted at runtime.",
+          ),
+        containerImage: z
+          .string()
+          .optional()
+          .describe(
+            "Docker image tag for the per-meeting Vellum Runtime bot container. Defaults to vellum-meet-bot:dev.",
+          ),
+      })
+      .default({})
+      .describe(
+        "Vellum Runtime (provider 'vellum') settings consolidated from config/meet.json. Values set here win over that file; the long-tail fields (avatar, proactive chat, voice mode) still live in config/meet.json.",
       ),
   })
   .describe(

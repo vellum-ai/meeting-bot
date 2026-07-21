@@ -15,5 +15,10 @@
     "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["hooks", "routes", "tools", "src"]
+  "include": ["hooks", "routes", "tools", "src"],
+  "exclude": [
+    "src/vellum/meet/bot",
+    "src/vellum/meet/meet-controller-ext",
+    "src/vellum/meet/**/__tests__"
+  ]
 }

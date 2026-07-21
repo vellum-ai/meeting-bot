@@ -8,7 +8,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { applyConfigUpdate, readConfigView } from "../app-settings.ts";
+import {
+  applyConfigUpdate,
+  applyProviderChange,
+  readConfigView,
+} from "../app-settings.ts";
 
 function configPath(contents?: unknown): string {
   const dir = mkdtempSync(join(tmpdir(), "meeting-bot-config-"));
@@ -84,9 +88,30 @@ describe("applyConfigUpdate", () => {
   });
 
   test("a single-field update leaves other editable fields intact", () => {
-    const path = configPath({ useVoiceMode: true, provider: "recall" });
-    const view = applyConfigUpdate(path, { provider: "vellum" });
+    const path = configPath({ useVoiceMode: true, region: "us-east-1" });
+    const view = applyConfigUpdate(path, { region: "us-west-2" });
     expect(view.useVoiceMode).toBe(true);
+    expect(view.region).toBe("us-west-2");
+  });
+});
+
+describe("applyProviderChange", () => {
+  test("persists the provider and preserves unrelated fields", () => {
+    const path = configPath({ publicWsUrl: "wss://x", useVoiceMode: true });
+    const view = applyProviderChange(path, { provider: "vellum" });
     expect(view.provider).toBe("vellum");
+    expect(view.useVoiceMode).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({
+      publicWsUrl: "wss://x",
+      useVoiceMode: true,
+      provider: "vellum",
+    });
+  });
+
+  test("switching back to recall persists", () => {
+    const path = configPath({ provider: "vellum" });
+    expect(applyProviderChange(path, { provider: "recall" }).provider).toBe(
+      "recall",
+    );
   });
 });
