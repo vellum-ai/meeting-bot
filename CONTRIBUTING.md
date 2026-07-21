@@ -38,25 +38,16 @@ purpose.
 
 ### The Recall API key (the secret)
 
-The API key is **not** stored in config. Store it in the secure credential store
-under the name `recall:api_key` (service `recall`, field `api_key`):
+The API key is **not** stored in config, and the credential name is not
+configurable: the plugin always resolves it from one fixed credential, service
+`meeting-bot`, field `api_key`. Store it in the secure credential store:
 
 ```bash
-assistant credentials set --service recall --field api_key "recall_..."
+assistant credentials set --service meeting-bot --field api_key "recall_..."
 ```
 
-At call time the plugin resolves the key from the environment, under the
-variable derived from that name — `recall:api_key` → `RECALL_API_KEY` — which the
-host provisions from the credential store. For a quick local dev run you can
-export it yourself:
-
-```bash
-export RECALL_API_KEY="recall_..."
-```
-
-If you store the key under a different name, set `apiKeyCredential` in the config
-(below) to that `service:field` name; otherwise leave it unset and the default
-`recall:api_key` is used.
+At call time the plugin resolves it in-process via the host's
+`resolveCredential`; the secret never lives as plaintext in config.
 
 ### The config (not secret)
 

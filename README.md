@@ -102,16 +102,16 @@ The host passes config to the `init` hook as `InitContext.config`. See
 
 ### API key
 
-The Recall API key is **not** a config field. `config.json` carries only the
-credential's *name* — `apiKeyCredential`, defaulting to `recall:api_key` — so
-the secret itself lives in the secure credential store / CES rather than as
-plaintext in config. Because the name defaults, an operator who stores the key
-under `recall:api_key` needs no config for it at all.
+The Recall API key is **not** a config field, and the credential name is not
+configurable. The plugin always resolves it from one fixed credential (service
+`meeting-bot`, field `api_key`) in the secure credential store, so the secret
+never lives as plaintext in `config.json`. Store it with:
 
-At call time the plugin resolves the secret from the environment, under the
-variable derived from the credential name (`recall:api_key` → `RECALL_API_KEY`).
-The host provisions that value from the credential store. Set `apiKeyCredential`
-only when the key is stored under a different name.
+```bash
+assistant credentials set --service meeting-bot --field api_key "recall_..."
+```
+
+At call time the plugin resolves it in-process via the host's `resolveCredential`.
 
 Notable optional fields: `region` (default `us-east-1`), `listenHost` /
 `listenPort` (where the realtime server binds locally), `verificationToken`

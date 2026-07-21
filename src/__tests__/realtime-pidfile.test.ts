@@ -25,7 +25,6 @@ const noopLogger = {
 
 function makeConfig(port: number): MeetingBotConfig {
   return {
-    apiKeyCredential: "meeting-bot:api_key",
     region: "us-east-1",
     publicWsUrl: "ws://localhost:0",
     listenHost: "127.0.0.1",
