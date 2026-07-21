@@ -7,3 +7,6 @@ config.json
 data/
 .disabled
 install-meta.json
+
+# Compiled app output (built by the host from apps/<name>/src/).
+apps/*/dist/

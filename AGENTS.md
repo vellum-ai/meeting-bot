@@ -14,9 +14,11 @@ their realtime event streams. It is the Recall-backed counterpart to the
 ```
 hooks/init.ts        default-exports the init hook     (start realtime server, write resolved-config.json)
 hooks/shutdown.ts    default-exports the shutdown hook  (stop realtime server)
+routes/*.ts          HTTP routes under /x/plugins/meeting-bot/ (named GET/PATCH exports)
+apps/meeting-bot-dashboard/  workspace-panel app (compiled React under src/) for history + settings
 skills/meeting-bot/  join/leave skill with scripts       (run as standalone bun processes)
 skills/meeting-bot-setup/  setup skill with reload script (guides user through credential setup)
-src/                 internals (config, recall client, realtime server, store)
+src/                 internals (config, recall client, realtime server, store, app routes/settings)
 ```
 
 There is no `register.ts` and no host stub: the plugin talks to the host only

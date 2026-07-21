@@ -59,6 +59,38 @@ visible in the assistant's process tree (`assistant ps`).
 - **`meeting_bot_join`** — create a bot and send it to a meeting URL.
 - **`meeting_bot_leave`** — have a bot leave its call.
 
+## Configuration app
+
+The plugin ships a workspace-panel app (`apps/meeting-bot-dashboard/`) for
+viewing meeting history and editing settings, backed by plugin HTTP routes
+(`routes/`). Both are standard Vellum plugin extension surfaces (see
+[Apps](https://www.vellum.ai/docs/extensibility/apps) and
+[Routes](https://www.vellum.ai/docs/extensibility/routes)), so the host serves
+them; the plugin does not stand up its own web server.
+
+The app is a compiled React app (`apps/meeting-bot-dashboard/src/`, built by the
+host into `dist/`). It calls the plugin's routes, served under
+`/x/plugins/meeting-bot/`:
+
+| Route                                    | Purpose                                       |
+| ---------------------------------------- | --------------------------------------------- |
+| `GET /x/plugins/meeting-bot/meetings`    | Meeting history as JSON (newest first).       |
+| `GET /x/plugins/meeting-bot/settings`    | Current editable settings as JSON.            |
+| `PATCH /x/plugins/meeting-bot/settings`  | Update settings; returns the new settings.    |
+
+Two settings are editable:
+
+| Setting        | Type                       | Default  |
+| -------------- | -------------------------- | -------- |
+| `useVoiceMode` | boolean                    | `false`  |
+| `provider`     | enum (`recall` / `vellum`) | `recall` |
+
+Settings persist to the plugin's `config.json` (the same host-owned config the
+`init` hook reads); an edit merges into that file, preserving other fields.
+Meeting history is read from `data/sessions.json`. Nothing consumes these
+settings to change behavior yet; a later change wires them into the join /
+voice-response paths.
+
 ## Configuration
 
 The host passes config to the `init` hook as `InitContext.config`. See

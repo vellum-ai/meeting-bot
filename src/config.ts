@@ -65,6 +65,13 @@ export const REALTIME_EVENTS = [
 
 export type RealtimeEvent = (typeof REALTIME_EVENTS)[number];
 
+/**
+ * Meeting-bot provider options. Chooses which backend the bot uses. Editable
+ * from the configuration app. Not yet consumed by the join path.
+ */
+export const MEETING_PROVIDERS = ["recall", "vellum"] as const;
+export type MeetingProvider = (typeof MEETING_PROVIDERS)[number];
+
 export const MeetingBotConfigSchema = z
   .object({
     apiKeyCredential: z
@@ -139,6 +146,18 @@ export const MeetingBotConfigSchema = z
         languageCode: "en",
         mode: "prioritize_low_latency",
       }),
+    useVoiceMode: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Whether the bot speaks its responses back into the meeting (voice mode). Editable from the configuration app. Not yet consumed by the join / voice-response paths.",
+      ),
+    provider: z
+      .enum(MEETING_PROVIDERS)
+      .default("recall")
+      .describe(
+        "Which meeting provider the bot uses. Editable from the configuration app. Not yet consumed by the join path.",
+      ),
   })
   .describe(
     "Recall.ai meeting-bot configuration — the API-key credential name, region, the realtime WebSocket callback URL, and transcription settings.",
