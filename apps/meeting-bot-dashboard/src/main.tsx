@@ -70,16 +70,17 @@ function readOnlyRows(config: ConfigView): Array<[string, string]> {
     ["Listen host", config.listenHost || "-"],
     ["Listen port", config.listenPort != null ? String(config.listenPort) : "-"],
     ["Realtime events", (config.events ?? []).join(", ") || "-"],
-    ["Transcript provider", config.transcript?.provider || "-"],
-    ["Transcript language", config.transcript?.languageCode || "-"],
     ["Transcript mode", config.transcript?.mode || "-"],
   ];
 }
 
+/** Per-field save state: which field is in flight, and the last outcome. */
+type FieldState = "idle" | "saving" | "saved" | "error";
+
 function Configuration() {
   const [config, setConfig] = useState<ConfigView | null>(null);
-  const [status, setStatus] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [fieldState, setFieldState] = useState<Record<string, FieldState>>({});
+  const [providerNote, setProviderNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -94,40 +95,59 @@ function Configuration() {
     };
   }, []);
 
-  async function save() {
+  function setField(field: string, state: FieldState) {
+    setFieldState((prev) => ({ ...prev, [field]: state }));
+    if (state === "saved" || state === "error") {
+      setTimeout(() => {
+        setFieldState((prev) =>
+          prev[field] === state ? { ...prev, [field]: "idle" } : prev,
+        );
+      }, 2500);
+    }
+  }
+
+  /**
+   * Every setting saves on change: PATCH the single edited field, keep the
+   * input optimistic while in flight, and reconcile with the server's view
+   * (or roll back on failure).
+   */
+  async function saveField(
+    field: "useVoiceMode" | "region",
+    value: boolean | string,
+  ) {
     if (!config) return;
-    setSaving(true);
-    setStatus("Saving...");
+    const previous = config;
+    setConfig({ ...config, [field]: value });
+    setField(field, "saving");
     try {
       const res = await vfetch(`${BASE}/settings`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          useVoiceMode: config.useVoiceMode,
-          region: config.region,
-        }),
+        body: JSON.stringify({ [field]: value }),
       });
       if (res.ok) {
         setConfig(await res.json());
-        setStatus("Saved");
+        setField(field, "saved");
       } else {
-        setStatus("Save failed");
+        setConfig(previous);
+        setField(field, "error");
       }
     } catch {
-      setStatus("Save failed");
-    } finally {
-      setSaving(false);
-      setTimeout(() => setStatus(""), 2500);
+      setConfig(previous);
+      setField(field, "error");
     }
   }
 
-  // The provider switch goes through its own route (it has side effects
-  // beyond a config write) and applies immediately on selection.
+  // The provider switch goes through its own route: it tears down the old
+  // provider runtime and starts the new one before responding, so the busy
+  // state can last a few seconds. Selecting the active provider again
+  // bounces its runtime.
   async function switchProvider(provider: Provider) {
     if (!config) return;
-    const previous = config.provider;
+    const previous = config;
     setConfig({ ...config, provider });
-    setStatus("Switching provider...");
+    setField("provider", "saving");
+    setProviderNote("");
     try {
       const res = await vfetch(`${BASE}/provider`, {
         method: "POST",
@@ -137,18 +157,28 @@ function Configuration() {
       if (res.ok) {
         const body = await res.json();
         setConfig(body);
-        setStatus(body.note || "Provider switched");
+        setField("provider", "saved");
+        setProviderNote(body.note || "");
+        setTimeout(() => setProviderNote(""), 5000);
       } else {
-        setConfig({ ...config, provider: previous });
-        setStatus("Provider switch failed");
+        setConfig(previous);
+        setField("provider", "error");
       }
     } catch {
-      setConfig({ ...config, provider: previous });
-      setStatus("Provider switch failed");
-    } finally {
-      setTimeout(() => setStatus(""), 4000);
+      setConfig(previous);
+      setField("provider", "error");
     }
   }
+
+  function fieldBadge(field: string) {
+    const state = fieldState[field] ?? "idle";
+    if (state === "idle") return null;
+    const text =
+      state === "saving" ? "Saving..." : state === "saved" ? "Saved" : "Failed";
+    return <span className={`field-status field-${state}`}>{text}</span>;
+  }
+
+  const busy = (field: string) => fieldState[field] === "saving";
 
   return (
     <section>
@@ -160,34 +190,41 @@ function Configuration() {
           <>
             <div className="row">
               <label htmlFor="useVoiceMode">Use Voice Mode</label>
+              {fieldBadge("useVoiceMode")}
               <input
                 id="useVoiceMode"
                 type="checkbox"
                 checked={config.useVoiceMode}
+                disabled={busy("useVoiceMode")}
                 onChange={(e) =>
-                  setConfig({ ...config, useVoiceMode: e.target.checked })
+                  void saveField("useVoiceMode", e.target.checked)
                 }
               />
             </div>
             <div className="row">
               <label htmlFor="provider">Provider</label>
+              {fieldBadge("provider")}
               <select
                 id="provider"
                 value={config.provider}
+                disabled={busy("provider")}
                 onChange={(e) => void switchProvider(e.target.value as Provider)}
               >
                 <option value="recall">Recall</option>
                 <option value="vellum">Vellum</option>
               </select>
             </div>
+            {providerNote ? (
+              <div className="row provider-note">{providerNote}</div>
+            ) : null}
             <div className="row">
               <label htmlFor="region">Region</label>
+              {fieldBadge("region")}
               <select
                 id="region"
                 value={config.region}
-                onChange={(e) =>
-                  setConfig({ ...config, region: e.target.value as Region })
-                }
+                disabled={busy("region")}
+                onChange={(e) => void saveField("region", e.target.value)}
               >
                 {REGIONS.map((r) => (
                   <option key={r} value={r}>
@@ -196,13 +233,9 @@ function Configuration() {
                 ))}
               </select>
             </div>
-            <button onClick={save} disabled={saving}>
-              Save
-            </button>
-            <span className="status">{status}</span>
 
             <div className="readonly">
-              <div className="readonly-title">Other configuration (read-only)</div>
+              <div className="readonly-title">Other</div>
               <dl>
                 {readOnlyRows(config).map(([label, value]) => (
                   <div className="dl-row" key={label}>

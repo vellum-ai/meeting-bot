@@ -16,6 +16,7 @@ import {
   readConfigView,
 } from "./app-settings.ts";
 import { readMeetingHistory } from "./meeting-history.ts";
+import { restartProviderRuntime } from "./provider-runtime.ts";
 import { pluginConfigPath, pluginDataDir } from "./plugin-paths.ts";
 
 function json(body: unknown, status = 200): Response {
@@ -66,9 +67,10 @@ export async function handleSettingsPatch(request: Request): Promise<Response> {
 /**
  * `POST /x/plugins/meeting-bot/provider`: switch the meeting provider. Its
  * own route (not part of the settings PATCH) because a provider change
- * carries side effects beyond the config write; today the switch takes
- * effect on the next plugin reload, and future side effects (live runtime
- * switchover) hang off this handler.
+ * carries side effects beyond the config write: after persisting, the old
+ * provider runtime is torn down and the new one spun up immediately (see
+ * `restartProviderRuntime`). Posting the currently active provider is a
+ * supported way to bounce the runtime in place.
  */
 export async function handleProviderPost(request: Request): Promise<Response> {
   let raw: unknown;
@@ -87,8 +89,6 @@ export async function handleProviderPost(request: Request): Promise<Response> {
   }
 
   const view = applyProviderChange(pluginConfigPath(), parsed.data);
-  return json({
-    ...view,
-    note: "provider change takes effect on the next plugin reload",
-  });
+  const note = await restartProviderRuntime();
+  return json({ ...view, note });
 }

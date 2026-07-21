@@ -176,7 +176,7 @@ export async function startRealtimeServer(
     ).toString("base64");
 
     // Resolve the subprocess script path relative to this module.
-    const scriptPath = new URL("./realtime-subprocess.ts", import.meta.url)
+    const scriptPath = new URL("./recall/worker.ts", import.meta.url)
       .pathname;
 
     const child = spawn(
@@ -376,7 +376,7 @@ function isOurSubprocess(pid: number): boolean {
     // /proc cmdline is NUL-separated; a substring match on the script name is
     // enough to distinguish our subprocess from any recycled PID.
     const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf-8");
-    return cmdline.includes("realtime-subprocess");
+    return cmdline.includes("recall/worker");
   } catch {
     return false;
   }
