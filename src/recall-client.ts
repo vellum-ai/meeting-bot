@@ -115,7 +115,7 @@ export async function createBot(
 
   const res = await fetch(`${recallApiBase(config.region)}bot/`, {
     method: "POST",
-    headers: authHeaders(await resolveApiKey(config)),
+    headers: authHeaders(await resolveApiKey()),
     body: JSON.stringify(body),
   });
 
@@ -141,7 +141,7 @@ export async function leaveCall(
 ): Promise<void> {
   const res = await fetch(
     `${recallApiBase(config.region)}bot/${encodeURIComponent(botId)}/leave_call/`,
-    { method: "POST", headers: authHeaders(await resolveApiKey(config)) },
+    { method: "POST", headers: authHeaders(await resolveApiKey()) },
   );
   if (!res.ok) {
     const text = await res.text();
@@ -160,7 +160,7 @@ export async function getBot(
 ): Promise<RecallBot> {
   const res = await fetch(
     `${recallApiBase(config.region)}bot/${encodeURIComponent(botId)}/`,
-    { method: "GET", headers: authHeaders(await resolveApiKey(config)) },
+    { method: "GET", headers: authHeaders(await resolveApiKey()) },
   );
   const text = await res.text();
   if (!res.ok) {
@@ -186,7 +186,7 @@ export async function outputAudio(
     `${recallApiBase(config.region)}bot/${encodeURIComponent(botId)}/output_audio/`,
     {
       method: "POST",
-      headers: authHeaders(await resolveApiKey(config)),
+      headers: authHeaders(await resolveApiKey()),
       body: JSON.stringify({ kind: "mp3", b64_data: mp3B64 }),
     },
   );

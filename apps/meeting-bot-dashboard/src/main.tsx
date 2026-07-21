@@ -14,6 +14,17 @@ import { createRoot } from "react-dom/client";
 
 const BASE = "/x/plugins/meeting-bot";
 
+/**
+ * Fetch through the host bridge when the app runs inside the Vellum workspace
+ * panel: `window.vellum.fetch` reaches the plugin routes with the right origin
+ * and auth. Falls back to the global `fetch` (e.g. when opened standalone).
+ */
+function vfetch(url: string, options?: RequestInit): Promise<Response> {
+  const fetcher = (window as unknown as { vellum?: { fetch?: typeof fetch } })
+    .vellum?.fetch ?? fetch;
+  return fetcher(url, options);
+}
+
 const PROVIDERS = ["recall", "vellum"] as const;
 type Provider = (typeof PROVIDERS)[number];
 
@@ -29,7 +40,6 @@ interface ConfigView {
   useVoiceMode: boolean;
   provider: Provider;
   region: Region;
-  apiKeyCredential?: string;
   publicWsUrl?: string;
   listenHost?: string;
   listenPort?: number;
@@ -57,7 +67,6 @@ function formatTime(ms: number): string {
 function readOnlyRows(config: ConfigView): Array<[string, string]> {
   return [
     ["Public WS URL", config.publicWsUrl || "(not set)"],
-    ["API key credential", config.apiKeyCredential || "-"],
     ["Listen host", config.listenHost || "-"],
     ["Listen port", config.listenPort != null ? String(config.listenPort) : "-"],
     ["Realtime events", (config.events ?? []).join(", ") || "-"],
@@ -74,7 +83,7 @@ function Configuration() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${BASE}/settings`)
+    vfetch(`${BASE}/settings`)
       .then((r) => (r.ok ? r.json() : null))
       .then((c: ConfigView | null) => {
         if (c && !cancelled) setConfig(c);
@@ -90,7 +99,7 @@ function Configuration() {
     setSaving(true);
     setStatus("Saving...");
     try {
-      const res = await fetch(`${BASE}/settings`, {
+      const res = await vfetch(`${BASE}/settings`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -189,7 +198,7 @@ function MeetingHistory() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${BASE}/meetings`)
+    vfetch(`${BASE}/meetings`)
       .then((r) => (r.ok ? r.json() : []))
       .then((m: Meeting[]) => {
         if (!cancelled) setMeetings(Array.isArray(m) ? m : []);

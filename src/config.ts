@@ -15,14 +15,13 @@
  *                     ingress in prod). The plugin's own WebSocket server must
  *                     be reachable at this address.
  *
- * The Recall API key is deliberately *not* a config field. Config carries only
- * the credential's *name* (`apiKeyCredential`, default `meeting-bot:api_key`) so
- * the secret itself can live in the secure credential store rather than as
- * plaintext in `config.json`. It is resolved from the credential store at call
- * time via the host's in-process `resolveCredential` (see {@link resolveApiKey});
- * the `meeting-bot-setup` skill guides the user through storing the key. Because
- * the name defaults to `meeting-bot:api_key`, an operator storing the key under
- * that default name needs no config for it at all.
+ * The Recall API key is deliberately *not* a config field, nor is the
+ * credential's name configurable: the plugin always resolves the key from a
+ * single fixed credential (`meeting-bot:api_key`) so the secret lives in the
+ * secure credential store rather than as plaintext in `config.json`. It is
+ * resolved at call time via the host's in-process `resolveCredential` (see
+ * {@link resolveApiKey}); the `meeting-bot-setup` skill guides the user through
+ * storing the key.
  *
  * Everything else has a working default. The realtime server binds locally on
  * `listenHost:listenPort`; a reverse proxy / tunnel maps `publicWsUrl` onto it.
@@ -74,16 +73,6 @@ export type MeetingProvider = (typeof MEETING_PROVIDERS)[number];
 
 export const MeetingBotConfigSchema = z
   .object({
-    apiKeyCredential: z
-      .string()
-      .regex(
-        /^[^\s:]+:[^\s:]+$/,
-        "must be a credential name of the form 'service:field' (e.g. meeting-bot:api_key)",
-      )
-      .default("meeting-bot:api_key")
-      .describe(
-        "Name of the credential holding the Recall.ai workspace API key, in 'service:field' form. The secret itself is NOT stored here — it lives in the secure credential store and is resolved at call time via `assistant credentials reveal`. Defaults to 'meeting-bot:api_key'; only set this when the key is stored under a different name.",
-      ),
     region: z
       .enum(RECALL_REGIONS)
       .default("us-east-1")
@@ -216,20 +205,14 @@ export function recallApiBase(region: RecallRegion): string {
 }
 
 /**
- * Parse a `service:field` credential name into its components.
- * `meeting-bot:api_key` -> `{ service: "meeting-bot", field: "api_key" }`.
+ * The fixed credential holding the Recall API key: service `meeting-bot`, field
+ * `api_key`. This is not configurable: the plugin always resolves the key from
+ * this one credential. Keep in sync with the standalone skill client
+ * (`skills/meeting-bot/scripts/meeting-bot-client.ts`), which hardcodes the same
+ * service/field.
  */
-export function parseCredentialName(
-  credentialName: string,
-): { service: string; field: string } {
-  const parts = credentialName.split(":");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw new Error(
-      `Invalid credential name "${credentialName}" — expected "service:field" (e.g. meeting-bot:api_key)`,
-    );
-  }
-  return { service: parts[0]!, field: parts[1]! };
-}
+export const CREDENTIAL_SERVICE = "meeting-bot";
+export const CREDENTIAL_FIELD = "api_key";
 
 /**
  * Resolve the Recall API key from the credential store.
@@ -251,17 +234,18 @@ export function parseCredentialName(
  * `assistant credentials reveal`; they run in their own process, not the
  * daemon, so blocking there does not stall the event loop.
  */
-export async function resolveApiKey(config: MeetingBotConfig): Promise<string> {
-  const { service, field } = parseCredentialName(config.apiKeyCredential);
+export async function resolveApiKey(): Promise<string> {
   try {
     // `resolveCredential` takes a `service/field` reference (slash-separated).
-    const value = (await resolveCredential(`${service}/${field}`)).trim();
+    const value = (
+      await resolveCredential(`${CREDENTIAL_SERVICE}/${CREDENTIAL_FIELD}`)
+    ).trim();
     if (!value) throw new Error("empty credential");
     return value;
   } catch {
     throw new Error(
-      `Recall API key not found. The credential "${config.apiKeyCredential}" must be stored in the credential store. ` +
-        `Run: assistant credentials set --service ${service} --field ${field} <your_key>\n` +
+      `Recall API key not found. The credential "${CREDENTIAL_SERVICE}:${CREDENTIAL_FIELD}" must be stored in the credential store. ` +
+        `Run: assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${CREDENTIAL_FIELD} <your_key>\n` +
         `Get a key at https://recall.ai/dashboard`,
     );
   }

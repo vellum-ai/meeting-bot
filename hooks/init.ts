@@ -20,7 +20,8 @@
 import type { InitContext } from "@vellumai/plugin-api";
 
 import {
-  parseCredentialName,
+  CREDENTIAL_FIELD,
+  CREDENTIAL_SERVICE,
   realtimeEndpointUrl,
   resolveApiKey,
   resolveConfig,
@@ -79,11 +80,14 @@ const init = async (ctx: InitContext): Promise<void> => {
   // stored in the credential store. The meeting-bot-setup skill guides
   // the user through providing it.
   try {
-    await resolveApiKey(config);
+    await resolveApiKey();
   } catch (err) {
-    const { service, field } = parseCredentialName(config.apiKeyCredential);
     ctx.logger.warn(
-      { credential: config.apiKeyCredential, service, field },
+      {
+        credential: `${CREDENTIAL_SERVICE}:${CREDENTIAL_FIELD}`,
+        service: CREDENTIAL_SERVICE,
+        field: CREDENTIAL_FIELD,
+      },
       `meeting-bot: ${String(err)}`,
     );
   }
