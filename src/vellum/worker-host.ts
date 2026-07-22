@@ -14,9 +14,13 @@
  *   - conversation writes are intentionally no-ops: transcripts reach the
  *     conversation daemon-side through meeting-bot's transcript-flush
  *     pipeline, not through `memory.addMessage`,
- *   - LLM / STT / TTS / speaker facets degrade to their documented
- *     unavailable values (empty / null / throw), since the sub-modules that
- *     would consume them are replaced with no-ops by the runtime.
+ *   - STT proxies to the daemon over the stdio relay (`stt-relay.ts`): the
+ *     daemon opens real streaming sessions via the plugin-api
+ *     `openTranscriptionSession` and the audio ingest here drives the proxy
+ *     transcriber exactly like a local one,
+ *   - LLM / TTS / speaker facets degrade to their documented unavailable
+ *     values (empty / null / throw), since the sub-modules that would
+ *     consume them are replaced with no-ops by the runtime.
  */
 
 import {
@@ -25,6 +29,7 @@ import {
   type Logger,
   type SkillHost,
 } from "./meet/plugin-host.ts";
+import type { StreamingTranscriber } from "./stt-types.ts";
 
 /** Writer for JSON-lines messages to the parent (injected for testability). */
 export type SendToParent = (obj: Record<string, unknown>) => void;
@@ -47,6 +52,12 @@ export interface WorkerHostArgs {
   assistantName: string | null;
   runtimeMode: DaemonRuntimeMode;
   send: SendToParent;
+  /**
+   * Opener for streaming transcription sessions, normally the stdio relay's
+   * `open()` (see stt-relay.ts). When absent (tests), the STT facet degrades
+   * to null and joins fail with the audio ingest's descriptive error.
+   */
+  openSttSession?: () => Promise<StreamingTranscriber | null>;
 }
 
 /** Build the SkillHost the Vellum Runtime worker hands to the vendored subsystem. */
@@ -84,9 +95,15 @@ export function createWorkerHost(args: WorkerHostArgs): SkillHost {
         },
       },
       stt: {
+        // Provider identity lives host-side; these two exist only to shape
+        // the audio ingest's "provider unusable" error message.
         listProviderIds: () => [],
         supportsBoundary: () => false,
-        resolveStreamingTranscriber: async () => null,
+        // The spec argument (sample rate, diarization preference) is
+        // resolved host-side from the assistant's own STT config; the
+        // audio format rides on each chunk's mimeType.
+        resolveStreamingTranscriber: async () =>
+          (await args.openSttSession?.()) ?? null,
       },
       tts: {
         get: (): never => {

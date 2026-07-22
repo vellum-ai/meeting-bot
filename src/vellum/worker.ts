@@ -65,6 +65,7 @@ import { ensureBrowserStack } from "./meet/src/ensure-browser-stack.ts";
 import { setMeetHost } from "./meet/src/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
 import { startMeetIngress } from "./ingress.ts";
+import { createWorkerSttRelay } from "./stt-relay.ts";
 import { createWorkerHost, type SendToParent } from "./worker-host.ts";
 
 import type { MeetingBotConfig } from "../config.ts";
@@ -82,7 +83,13 @@ export interface VellumWorkerArgs {
 }
 
 function send(obj: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify(obj)}\n`);
+  try {
+    process.stdout.write(`${JSON.stringify(obj)}\n`);
+  } catch {
+    // stdout is gone, so the supervisor is tearing this process down;
+    // late log lines (e.g. a slow browser-stack install failing during
+    // shutdown) have nowhere to go and must not crash the exit path.
+  }
 }
 
 /** No-op stand-ins for the meet-join sub-modules the Vellum Runtime does not use. */
@@ -140,11 +147,17 @@ async function main(): Promise<void> {
   ) as VellumWorkerArgs;
 
   const sendToParent: SendToParent = send;
+  // Streaming transcription rides the stdio relay: the daemon owns the real
+  // plugin-api sessions and this proxy feeds the vendored audio ingest.
+  const sttRelay = createWorkerSttRelay(send, (msg) =>
+    send({ type: "log", level: "warn", msg: `[stt-relay] ${msg}` }),
+  );
   const host = createWorkerHost({
     workspaceDir: args.workspaceDir,
     assistantName: args.assistantName,
     runtimeMode: args.runtimeMode,
     send: sendToParent,
+    openSttSession: () => sttRelay.open(),
   });
   setMeetHost(host);
   const log = host.logger.get("vellum-runtime");
@@ -288,10 +301,30 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // stdin carries the plain "stop" command plus JSON-lines replies from the
+  // daemon (currently only the stt.* relay messages). Chunks are buffered so
+  // a line split across reads is never half-parsed.
+  let stdinBuffer = "";
   process.stdin.setEncoding("utf-8");
   process.stdin.on("data", (chunk: string) => {
-    for (const line of chunk.split("\n")) {
-      if (line.trim() === "stop") void shutdown();
+    stdinBuffer += chunk;
+    let idx: number;
+    while ((idx = stdinBuffer.indexOf("\n")) !== -1) {
+      const line = stdinBuffer.slice(0, idx).trim();
+      stdinBuffer = stdinBuffer.slice(idx + 1);
+      if (!line) continue;
+      if (line === "stop") {
+        void shutdown();
+        continue;
+      }
+      if (line.startsWith("{")) {
+        try {
+          const msg = JSON.parse(line) as Record<string, unknown>;
+          sttRelay.handleMessage(msg);
+        } catch {
+          // malformed daemon line; ignore
+        }
+      }
     }
   });
   process.stdin.on("close", () => {

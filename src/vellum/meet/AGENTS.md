@@ -50,6 +50,13 @@ config-schema.ts     services.meet config schema (read from
   adapts relayed events into meeting-bot's session store and transcript-flush
   pipeline (`handleVellumMeetEvent`). meet-join's own conversation bridge is
   not used.
+- Streaming STT for the audio ingest comes from the assistant host: the
+  daemon opens sessions via the plugin-api `openTranscriptionSession`
+  (feature-detected in `src/vellum/stt-api.ts`; requires a 0.10.12+ host)
+  and relays audio/events over the worker's stdio channel
+  (`src/vellum/stt-bridge.ts` daemon-side, `src/vellum/stt-relay.ts`
+  worker-side). On older hosts the resolver degrades to null and joins fail
+  with the audio ingest's descriptive error.
 - The join/leave skill scripts call the worker's control endpoint at
   `127.0.0.1:listenPort` (read from resolved-config.json; loopback-only,
   internal, no token).
