@@ -94,11 +94,11 @@ export const MeetingBotConfigSchema = z
     listenPort: z
       .number()
       .int()
-      .min(0)
+      .min(1)
       .max(65535)
       .default(8790)
       .describe(
-        "Local loopback port the active provider runtime listens on: the realtime WebSocket server (recall) or the Vellum Runtime control server (vellum). Always bound on 127.0.0.1. 0 selects an ephemeral port (recall only).",
+        "Local loopback port the active provider runtime listens on: the realtime WebSocket server (recall) or the Vellum Runtime control server (vellum). Always bound on 127.0.0.1.",
       ),
     verificationToken: z
       .string()
@@ -194,12 +194,6 @@ export function resolveConfig(raw: unknown): ConfigResolution {
       "publicWsUrl is not set — the plugin will auto-provision a Cloudflare Tunnel at init time. This is insecure and intended for development only. Set publicWsUrl explicitly for production deployments.",
     );
   }
-  if (config.provider === "vellum" && config.listenPort === 0) {
-    warnings.push(
-      "listenPort is 0 with provider \"vellum\": the skill scripts read this port from resolved-config.json to reach the control server, so it must be a fixed port.",
-    );
-  }
-
   return { config, warnings };
 }
 
