@@ -77,6 +77,7 @@ import {
 import { getMeetConfig } from "./meet/meet-config.ts";
 import { setMeetHost } from "./meet/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
+import { augmentProcessPath } from "../path-env.ts";
 import { ensureBrowserStack } from "./browser-stack.ts";
 import { startMeetIngress } from "./ingress.ts";
 import { createJoinStatusTracker } from "./join-status.ts";
@@ -167,6 +168,12 @@ async function main(): Promise<void> {
     Buffer.from(encoded, "base64").toString("utf-8"),
   ) as VellumWorkerArgs;
 
+  // Re-augment PATH in this process too (the supervisor already hands us
+  // an augmented one): the browser-stack probes, apt-get, and every bot
+  // process inherit process.env from here, so this is the single choke
+  // point that keeps /data/system/bin and friends visible downstream.
+  const addedPathDirs = augmentProcessPath();
+
   const sendToParent: SendToParent = send;
   // Streaming transcription rides the stdio relay: the daemon owns the real
   // plugin-api sessions and this proxy feeds the vendored audio ingest.
@@ -186,6 +193,11 @@ async function main(): Promise<void> {
   });
   setMeetHost(host);
   const log = host.logger.get("vellum-runtime");
+  if (addedPathDirs.length > 0) {
+    log.info("added missing well-known bin directories to PATH", {
+      added: addedPathDirs,
+    });
+  }
 
   // Bot backend probe, mirroring meet-join's init hook: a Docker container
   // per meeting when an engine is reachable, else a direct child process.
