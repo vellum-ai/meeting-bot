@@ -52,7 +52,7 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import type {
   DaemonRuntimeMode,
@@ -679,6 +679,16 @@ export interface MeetSessionManagerDeps {
   /** Override workspace directory resolution (tests). */
   getWorkspaceDir?: () => string;
   /**
+   * Override where per-meeting artifact directories
+   * (`<root>/<meetingId>/` with bot.log, out/) are created. Defaults to
+   * `<workspace>/meets`. meeting-bot points this at the plugin's data
+   * directory so everything the runtime writes stays under it. Must
+   * resolve to a path inside the workspace dir: the docker backend mounts
+   * `<meetingDir>/out` into the bot container via a workspace-relative
+   * subpath.
+   */
+  resolveMeetingsRoot?: () => string;
+  /**
    * Override the audio-ingest factory. Default constructs a
    * {@link MeetAudioIngest} with its own defaults.
    */
@@ -915,6 +925,8 @@ class MeetSessionManagerImpl {
       botAvatarFetch: deps.botAvatarFetch ?? defaultBotAvatarFetch,
       resolveDaemonUrl: deps.resolveDaemonUrl ?? defaultResolveDaemonUrl,
       getWorkspaceDir: resolveWorkspaceDir,
+      resolveMeetingsRoot:
+        deps.resolveMeetingsRoot ?? (() => join(resolveWorkspaceDir(), "meets")),
       audioIngestFactory: deps.audioIngestFactory ?? audioIngestBuilder,
       consentMonitorFactory:
         deps.consentMonitorFactory ??
@@ -1157,7 +1169,7 @@ class MeetSessionManagerImpl {
         this.assertAvatarDeviceAvailable(meet.avatar.devicePath);
       }
 
-      meetingDir = join(workspaceDir, "meets", meetingId);
+      meetingDir = join(this.deps.resolveMeetingsRoot(), meetingId);
       outDir = join(meetingDir, "out");
       mkdirSync(outDir, { recursive: true });
 
@@ -1344,8 +1356,11 @@ class MeetSessionManagerImpl {
         // to either a host-path bind (bare-metal mode) or a named-volume
         // subpath mount (Docker mode) based on the daemon's runtime mode.
         // Session-manager stays mode-agnostic.
+        // Workspace-relative so the runner can resolve it under its own
+        // workspace root; the meetings root may live anywhere inside the
+        // workspace (meeting-bot points it at the plugin data dir).
         workspaceMounts: [
-          { target: "/out", subpath: `meets/${meetingId}/out` },
+          { target: "/out", subpath: relative(workspaceDir, outDir) },
         ],
         ports: [
           {
@@ -1903,6 +1918,16 @@ class MeetSessionManagerImpl {
         });
       }
     }
+
+    // Persist the bot's output before the container/process record is
+    // removed, so a post-mortem log exists for completed meetings too (the
+    // join-rollback paths already capture on failure).
+    await captureBotLogs(
+      runner,
+      session.containerId,
+      join(this.deps.resolveMeetingsRoot(), meetingId),
+      this.log,
+    );
 
     try {
       await runner.remove(session.containerId);

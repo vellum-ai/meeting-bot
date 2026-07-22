@@ -83,6 +83,11 @@ const STYLES = `
     display: flex; align-items: center; justify-content: flex-end;
     gap: 10px; padding-top: 10px; font-size: 12px;
   }
+  .botlog {
+    margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; line-height: 1.45; white-space: pre-wrap;
+    word-break: break-word; max-height: 420px; overflow: auto;
+  }
   .pager .count { opacity: 0.7; }
   .back { margin-bottom: 14px; }
   .readonly {
@@ -487,6 +492,26 @@ function MeetingDetail({
   meeting: Meeting;
   onBack: () => void;
 }) {
+  // The bot log captured for this meeting (data/meets/<id>/bot.log),
+  // written by the runtime on join failure and at leave. null = loading,
+  // "" = confirmed absent.
+  const [log, setLog] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    vfetch(`${BASE}/meeting-log?botId=${encodeURIComponent(meeting.botId)}`)
+      .then(async (r) => {
+        if (cancelled) return;
+        setLog(r.ok ? await r.text() : "");
+      })
+      .catch(() => {
+        if (!cancelled) setLog("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting.botId]);
+
   const facts: Array<[string, React.ReactNode]> = [
     ["Meeting URL", <span className="url">{meeting.meetingUrl || "-"}</span>],
     ["Status", <StatusCell meeting={meeting} />],
@@ -512,6 +537,16 @@ function MeetingDetail({
             </div>
           ))}
         </dl>
+      </div>
+      <h2>Bot log</h2>
+      <div className="card">
+        {log === null ? (
+          <div className="empty">Loading...</div>
+        ) : log === "" ? (
+          <div className="empty">No bot log captured for this meeting.</div>
+        ) : (
+          <pre className="botlog">{log}</pre>
+        )}
       </div>
     </section>
   );

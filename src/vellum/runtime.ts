@@ -336,6 +336,7 @@ export function initVellumRuntime(
     const args = {
       config,
       workspaceDir: resolveWorkspaceDirFromContext(ctx),
+      dataDir: pluginDataDir(),
       assistantName: resolveAssistantName(ctx.pluginStorageDir),
       runtimeMode: process.env.IS_CONTAINERIZED ? "docker" : "bare-metal",
     };

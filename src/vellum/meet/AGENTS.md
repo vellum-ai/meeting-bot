@@ -53,6 +53,14 @@ config-schema.ts     services.meet config schema (read from
   adapts relayed events into meeting-bot's session store and transcript-flush
   pipeline (`handleVellumMeetEvent`). meet-join's own conversation bridge is
   not used.
+- Per-meeting artifacts (bot.log, out/) are written under the PLUGIN DATA
+  directory (`data/meets/<meetingId>/`), not `<workspace>/meets`: the
+  worker injects `resolveMeetingsRoot` into the session manager, and the
+  docker /out mount resolves through a workspace-relative subpath. Bot
+  logs are captured on join rollback and at leave; the dashboard's
+  meeting page serves them via the meeting-log route. The (disabled)
+  storage-writer sub-module still derives `<workspace>/meets` on its own
+  and needs the same rerooting if it is ever enabled.
 - Streaming STT for the audio ingest comes from the assistant host: the
   daemon opens sessions via the plugin-api `openTranscriptionSession`
   (feature-detected in `src/vellum/stt-api.ts`; requires a 0.10.12+ host)
