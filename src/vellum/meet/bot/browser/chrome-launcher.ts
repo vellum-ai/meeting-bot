@@ -24,7 +24,7 @@
 
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 
-import { AVATAR_DEVICE_PATH_DEFAULT } from "../../../shared/avatar-device-path.js";
+import { AVATAR_DEVICE_PATH_DEFAULT } from "../../shared/avatar-device-path.js";
 
 export interface ChromeLauncherLogger {
   info: (message: string) => void;
@@ -103,7 +103,7 @@ const DEFAULT_SIGKILL_GRACE_MS = 5_000;
  * Default v4l2loopback device path consumed when `avatarEnabled` is true.
  *
  * Re-exports the zero-dependency constant from
- * {@link ../../../shared/avatar-device-path.js AVATAR_DEVICE_PATH_DEFAULT}
+ * {@link ../../shared/avatar-device-path.js AVATAR_DEVICE_PATH_DEFAULT}
  * so the launcher stays independent of `src/media/video-device.ts`'s
  * `node:fs` / `v4l2-ctl` surface while still guaranteeing the two modules
  * (and the workspace config default, and the CLI device-passthrough

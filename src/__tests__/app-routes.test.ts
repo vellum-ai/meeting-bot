@@ -28,7 +28,7 @@ function patch(body: string): Request {
 
 describe("handleMeetingsGet", () => {
   test("returns a JSON array", async () => {
-    const res = handleMeetingsGet();
+    const res = await handleMeetingsGet();
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/json");
     expect(Array.isArray(await res.json())).toBe(true);
@@ -41,7 +41,7 @@ describe("handleSettingsGet", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(typeof body.useVoiceMode).toBe("boolean");
-    expect(["recall", "vellum"]).toContain(body.provider);
+    expect(["recall", "vellum"]).toContain(body.provider as string);
     expect(typeof body.region).toBe("string");
     expect(body).not.toHaveProperty("verificationToken");
   });

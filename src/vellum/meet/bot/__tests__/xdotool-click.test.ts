@@ -10,7 +10,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, test } from "bun:test";
 
-import { xdotoolClick } from "../src/browser/xdotool-click.js";
+import { xdotoolClick } from "../browser/xdotool-click.js";
 
 interface SpawnCall {
   command: string;

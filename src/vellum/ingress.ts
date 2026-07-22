@@ -168,7 +168,7 @@ export function startMeetIngress(log: Logger, routesDir: string): MeetIngress {
     },
   });
 
-  const port = server.port;
+  const port = server.port ?? 0;
   log.info("meeting-bot: ingress started", { port });
 
   return {

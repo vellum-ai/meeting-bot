@@ -29,7 +29,7 @@ import {
   resolveAvatarRenderer,
   type AvatarConfig,
   type AvatarRendererDeps,
-} from "../src/media/avatar/index.js";
+} from "../media/avatar/index.js";
 
 import { FakeAvatarRenderer } from "./avatar-interface.test.js";
 

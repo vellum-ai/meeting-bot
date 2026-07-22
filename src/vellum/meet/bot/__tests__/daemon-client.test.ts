@@ -17,7 +17,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { MeetBotEvent } from "../../contracts/index.js";
 
-import { DaemonClient, type FetchFn } from "../src/control/daemon-client.js";
+import { DaemonClient, type FetchFn } from "../control/daemon-client.js";
 
 /** Shape the mock records for every intercepted request. */
 interface RecordedCall {

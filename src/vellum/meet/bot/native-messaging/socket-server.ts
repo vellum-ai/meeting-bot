@@ -8,7 +8,7 @@
  * socket. From the bot's perspective the transport is plain newline-delimited
  * JSON: each `\n`-terminated line is a single message, validated against the
  * {@link ExtensionToBotMessageSchema} / {@link BotToExtensionMessageSchema}
- * pair from {@link ../../../contracts/native-messaging.js}.
+ * pair from {@link ../../contracts/native-messaging.js}.
  *
  * Design notes:
  *
@@ -41,7 +41,7 @@ import {
   ExtensionToBotMessageSchema,
   type BotToExtensionMessage,
   type ExtensionToBotMessage,
-} from "../../../contracts/native-messaging.js";
+} from "../../contracts/native-messaging.js";
 
 /** Minimal logger surface the server needs. */
 export interface NmhSocketLogger {

@@ -24,7 +24,7 @@ import {
   type CapturedSocket,
   type SpawnedParec,
   startAudioCapture,
-} from "../src/media/audio-capture.js";
+} from "../media/audio-capture.js";
 
 /** -------------------- helpers --------------------------------------- */
 

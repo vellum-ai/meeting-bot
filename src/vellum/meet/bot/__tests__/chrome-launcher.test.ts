@@ -14,7 +14,7 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 
-import { launchChrome } from "../src/browser/chrome-launcher.js";
+import { launchChrome } from "../browser/chrome-launcher.js";
 
 interface SpawnCall {
   command: string;

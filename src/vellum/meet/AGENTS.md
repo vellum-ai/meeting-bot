@@ -12,7 +12,8 @@ slot in behind the same runtime.
 contracts/           bot <-> daemon event + command schemas
 daemon/              session manager, runners (docker/direct), audio ingest,
                      event routing/publishing, optional sub-modules
-src/                 tool runtime slot, browser-stack bootstrap
+tool-runtime.ts      live SkillHost slot the routes read at request time
+target-meeting.ts    meeting-id targeting helper
 routes/              meet-internal.ts only: the bot-event ingress route,
                      served by the in-process ingress
                      (src/vellum/ingress.ts, one level up) inside the Vellum
@@ -20,7 +21,9 @@ routes/              meet-internal.ts only: the bot-event ingress route,
                      control lives on the worker's own loopback server,
                      not in route files.
 bot/                 the containerized bot (Chromium + extension + Pulse/Xvfb);
-                     its own package, built via bot/Dockerfile (context: this dir)
+                     sources directly under bot/ (no src/ nesting, no own
+                     package.json: deps live in the plugin root manifest),
+                     built via bot/Dockerfile (context: plugin repo root)
 meet-controller-ext/ the Chrome extension the bot loads. Its manifest `key`
                      is the extension's PUBLIC key (SPKI): it pins a stable
                      extension ID so the native-messaging-host manifest's
@@ -92,8 +95,11 @@ Kept intentionally minimal so diffs against meet-join history stay readable:
 ## Tests
 
 The whole tree (bot, extension, and tests included) typechecks under the
-root `tsconfig.json`; the per-package tsconfigs in bot/ and
-meet-controller-ext/ remain only for their standalone build/dev flows. The
+root `tsconfig.json`. The bot has no package.json or tsconfig of its own:
+its sources live directly under `bot/` and its dependencies are
+consolidated into the plugin's root package.json, so a plain `bun install`
+at plugin install time covers it. Only meet-controller-ext keeps a
+per-package manifest, for its standalone extension build. The
 vendored suites are still excluded from the default `bun test` run (see
 root `bunfig.toml`) but pass in a bare environment (suites needing Docker or
 a live Meet self-skip), so CI runs them as a required job (`vellum-runtime`
@@ -103,11 +109,12 @@ in `.github/workflows/test.yml`). Run them locally with
 ## Bot image
 
 The docker backend uses the image packaged with the plugin
-(`vellum-meet-bot:dev`); it is not operator-configurable. Build it from this
-directory as the context:
+(`vellum-meet-bot:dev`); it is not operator-configurable. Build it from the
+PLUGIN REPO ROOT as the context (the image installs dependencies from the
+root package.json):
 
 ```bash
-docker build --platform linux/amd64 -f bot/Dockerfile -t vellum-meet-bot:dev .
+docker build --platform linux/amd64 -f src/vellum/meet/bot/Dockerfile -t vellum-meet-bot:dev .
 ```
 
 With no Docker engine, the runtime falls back to running the bot as a direct

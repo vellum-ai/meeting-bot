@@ -46,14 +46,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { createHttpServer } from "../../bot/src/control/http-server.js";
+import { createHttpServer } from "../../bot/control/http-server.js";
 import {
   __resetAvatarRegistryForTests,
   registerAvatarRenderer,
   type AvatarConfig,
-} from "../../bot/src/media/avatar/index.js";
-import type { VideoDeviceHandle } from "../../bot/src/media/video-device.js";
-import { BotState } from "../../bot/src/control/state.js";
+} from "../../bot/media/avatar/index.js";
+import type { VideoDeviceHandle } from "../../bot/media/video-device.js";
+import { BotState } from "../../bot/control/state.js";
 import { FakeAvatarRenderer } from "../../bot/__tests__/avatar-interface.test.js";
 
 import {

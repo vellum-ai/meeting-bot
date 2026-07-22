@@ -36,7 +36,7 @@ import type {
   BotAvatarStartCommand,
   BotAvatarStopCommand,
   ExtensionToBotMessage,
-} from "../../../../contracts/native-messaging.js";
+} from "../../../contracts/native-messaging.js";
 
 import {
   AvatarRendererUnavailableError,

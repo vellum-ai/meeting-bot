@@ -24,8 +24,8 @@ import { Readable, Writable } from "node:stream";
 import {
   createFrameReader,
   encodeFrame,
-} from "../src/native-messaging/nmh-protocol.js";
-import { runShim } from "../src/native-messaging/nmh-shim.js";
+} from "../native-messaging/nmh-protocol.js";
+import { runShim } from "../native-messaging/nmh-shim.js";
 
 /** Build a fresh ephemeral socket path per test. */
 function freshSocketPath(): string {

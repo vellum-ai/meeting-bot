@@ -27,7 +27,7 @@ import {
   createNmhSocketServer,
   type NmhSocketLogger,
   type NmhSocketServer,
-} from "../src/native-messaging/socket-server.js";
+} from "../native-messaging/socket-server.js";
 import type {
   BotToExtensionMessage,
   ExtensionToBotMessage,

@@ -5,16 +5,23 @@
   "description": "Send a note-taking bot to a meeting via Recall.ai. Recall drives the browser/join; the plugin stands up a realtime WebSocket receiver for live transcript and participant events.",
   "license": "MIT",
   "type": "module",
-  "keywords": ["meeting", "bot", "recall", "transcription", "realtime"],
+  "keywords": [
+    "meeting",
+    "bot",
+    "recall",
+    "transcription",
+    "realtime"
+  ],
   "peerDependencies": {
     "@vellumai/plugin-api": "^0.10.3"
   },
   "dependencies": {
-    "zod": "4.3.6"
+    "zod": "4.3.6",
+    "hono": "4.12.14"
   },
   "devDependencies": {
-    "@types/bun": "1.2.4",
+    "@types/bun": "1.3.9",
     "@types/chrome": "0.1.40",
-    "typescript": "5.7.3"
+    "typescript": "5.9.3"
   }
 }

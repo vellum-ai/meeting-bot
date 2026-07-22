@@ -4,7 +4,7 @@ import {
   PULSE_SETUP_SCRIPT_PATH,
   setupPulseAudio,
   teardownPulseAudio,
-} from "../src/media/pulse.js";
+} from "../media/pulse.js";
 
 /**
  * Unit tests for the PulseAudio wrapper.

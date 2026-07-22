@@ -7,13 +7,13 @@ import { join } from "node:path";
  *
  * Real Meet-join, audio capture, and Chrome/extension orchestration land in
  * later PRs of the meet-phase-1 plan; for now we only confirm that
- * `bun src/main.ts` runs to completion, exits 0, and emits the expected boot
+ * `bun main.ts` runs to completion, exits 0, and emits the expected boot
  * marker on stdout.
  */
 describe("meet-bot boot", () => {
-  test("runs src/main.ts and logs the boot marker", () => {
+  test("runs main.ts and logs the boot marker", () => {
     const pkgRoot = join(import.meta.dir, "..");
-    const result = spawnSync("bun", ["run", "src/main.ts"], {
+    const result = spawnSync("bun", ["run", "main.ts"], {
       cwd: pkgRoot,
       encoding: "utf8",
       // PulseAudio is not available on macOS dev machines / typical CI

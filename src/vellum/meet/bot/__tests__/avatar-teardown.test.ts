@@ -51,14 +51,14 @@ import {
   type AvatarRendererDeps,
   type DeviceWriterHandle,
   type DeviceWriterSink,
-} from "../src/media/avatar/index.js";
-import { NoopAvatarRenderer } from "../src/media/avatar/noop-renderer.js";
+} from "../media/avatar/index.js";
+import { NoopAvatarRenderer } from "../media/avatar/noop-renderer.js";
 import {
   TALKING_HEAD_RENDERER_ID,
   TalkingHeadRenderer,
   type JpegToY4mSpawnFactory,
-} from "../src/media/avatar/talking-head/renderer.js";
-import type { VideoDeviceHandle } from "../src/media/video-device.js";
+} from "../media/avatar/talking-head/renderer.js";
+import type { VideoDeviceHandle } from "../media/video-device.js";
 
 import { FakeAvatarRenderer } from "./avatar-interface.test.js";
 
@@ -362,7 +362,7 @@ const rendererCases: RendererCase[] = [
 
 // ---------------------------------------------------------------------------
 // Shared teardown invariants — assert the shape the `/avatar/disable`
-// handler promises (`bot/src/control/http-server.ts`): writer stops,
+// handler promises (`bot/control/http-server.ts`): writer stops,
 // device handle closes, renderer stops, no stray subscribers, no late
 // frames reach the sink.
 // ---------------------------------------------------------------------------
@@ -414,7 +414,7 @@ describe.each(rendererCases)(
         });
       }
 
-      // ---- Teardown (mirroring bot/src/control/http-server.ts:
+      // ---- Teardown (mirroring bot/control/http-server.ts:
       // /avatar/disable): writer.stop() → device.close() →
       // renderer.stop(). The bot's handler runs these three in
       // sequence; a renderer that leaks a subprocess or tab would

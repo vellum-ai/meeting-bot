@@ -53,15 +53,15 @@ import type {
   LifecycleEvent,
   LifecycleState,
   MeetBotEvent,
-} from "../../contracts/index.js";
+} from "../contracts/index.js";
 import type {
   BotToExtensionMessage,
   ExtensionToBotMessage,
-} from "../../contracts/native-messaging.js";
+} from "../contracts/native-messaging.js";
 import {
   trustedTypeKillTimeoutMs,
   trustedTypeReplyTimeoutMs,
-} from "../../contracts/native-messaging.js";
+} from "../contracts/native-messaging.js";
 
 import {
   launchChrome,

@@ -38,15 +38,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   createHttpServer,
   type HttpServerHandle,
-} from "../src/control/http-server.js";
-import { BotState } from "../src/control/state.js";
+} from "../control/http-server.js";
+import { BotState } from "../control/state.js";
 import {
   DEFAULT_BYTES_PER_MS,
   __resetForTests,
   stopAudioPlayback,
   type PacatWritable,
   type SpawnedPacat,
-} from "../src/media/audio-playback.js";
+} from "../media/audio-playback.js";
 
 const API_TOKEN = "test-token-loopback";
 

@@ -74,7 +74,7 @@ import {
   type MeetSessionManagerDeps,
 } from "./meet/daemon/session-manager.ts";
 import { getMeetConfig } from "./meet/meet-config.ts";
-import { setMeetHost } from "./meet/src/tool-runtime.ts";
+import { setMeetHost } from "./meet/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
 import { ensureBrowserStack } from "./browser-stack.ts";
 import { startMeetIngress } from "./ingress.ts";

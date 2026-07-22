@@ -16,14 +16,14 @@ import {
   AvatarRendererUnavailableError,
   type AvatarRenderer,
   type VisemeEvent,
-} from "../src/media/avatar/index.js";
+} from "../media/avatar/index.js";
 import {
   createHttpServer,
   type HttpServerAvatarOptions,
   type HttpServerHandle,
-} from "../src/control/http-server.js";
-import { BotState } from "../src/control/state.js";
-import type { VideoDeviceHandle } from "../src/media/video-device.js";
+} from "../control/http-server.js";
+import { BotState } from "../control/state.js";
+import type { VideoDeviceHandle } from "../media/video-device.js";
 
 import { FakeAvatarRenderer } from "./avatar-interface.test.js";
 

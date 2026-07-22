@@ -23,7 +23,7 @@
 import type {
   BotToExtensionMessage,
   ExtensionToBotMessage,
-} from "../../../contracts/native-messaging.js";
+} from "../../contracts/native-messaging.js";
 
 /**
  * Default timeout for a camera-toggle round-trip. Sized to allow the

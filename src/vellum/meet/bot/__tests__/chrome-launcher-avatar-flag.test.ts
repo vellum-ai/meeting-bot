@@ -33,7 +33,7 @@ import { EventEmitter } from "node:events";
 import {
   DEFAULT_AVATAR_DEVICE_PATH,
   launchChrome,
-} from "../src/browser/chrome-launcher.js";
+} from "../browser/chrome-launcher.js";
 
 interface SpawnCall {
   command: string;

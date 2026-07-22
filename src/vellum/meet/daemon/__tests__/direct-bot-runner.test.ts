@@ -65,7 +65,7 @@ function makeRunner(proc: FakeProc, allocatedPort = 54321): DirectBotRunner {
   return new DirectBotRunner({
     spawn,
     allocatePort: async () => allocatedPort,
-    botMainPath: "/plugin/bot/src/main.ts",
+    botMainPath: "/plugin/bot/main.ts",
     scratchRoot,
   });
 }
@@ -94,7 +94,7 @@ describe("DirectBotRunner.run", () => {
 
     const result = await runner.run(baseOpts);
 
-    expect(lastSpawn?.cmd).toEqual(["bun", "run", "/plugin/bot/src/main.ts"]);
+    expect(lastSpawn?.cmd).toEqual(["bun", "run", "/plugin/bot/main.ts"]);
     expect(lastSpawn?.env.HTTP_PORT).toBe("54321");
     expect(result.containerId).toBe("direct:4242");
     expect(result.boundPorts).toEqual([
