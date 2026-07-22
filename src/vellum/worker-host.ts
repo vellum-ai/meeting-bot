@@ -1,10 +1,10 @@
 /**
- * SkillHost implementation for the Vellum Runtime subprocess.
+ * SkillHost implementation for the Vellum Runtime worker.
  *
  * The runtime executes outside the daemon: there is no InitContext and no
  * daemon services to call, so plugin-api methods are not available here.
  * This host keeps everything the vendored subsystem needs local to the
- * subprocess:
+ * worker process:
  *
  *   - `logger` relays structured lines to the parent daemon over stdout
  *     (the supervisor forwards them to the plugin logger),
@@ -29,7 +29,7 @@ import {
 /** Writer for JSON-lines messages to the parent (injected for testability). */
 export type SendToParent = (obj: Record<string, unknown>) => void;
 
-/** Build a subprocess-local logger that relays to the parent over stdout. */
+/** Build a worker-local logger that relays to the parent over stdout. */
 export function createRelayLogger(name: string, send: SendToParent): Logger {
   const relay = (level: string) => (msg: string, meta?: unknown) => {
     send({ type: "log", level, msg: `[${name}] ${msg}`, meta });
@@ -42,15 +42,15 @@ export function createRelayLogger(name: string, send: SendToParent): Logger {
   };
 }
 
-export interface SubprocessHostArgs {
+export interface WorkerHostArgs {
   workspaceDir: string;
   assistantName: string | null;
   runtimeMode: DaemonRuntimeMode;
   send: SendToParent;
 }
 
-/** Build the SkillHost the Vellum Runtime subprocess hands to the vendored subsystem. */
-export function createSubprocessHost(args: SubprocessHostArgs): SkillHost {
+/** Build the SkillHost the Vellum Runtime worker hands to the vendored subsystem. */
+export function createWorkerHost(args: WorkerHostArgs): SkillHost {
   const { workspaceDir, assistantName, runtimeMode, send } = args;
 
   return {
@@ -66,7 +66,7 @@ export function createSubprocessHost(args: SubprocessHostArgs): SkillHost {
     platform: {
       workspaceDir: () => workspaceDir,
       vellumRoot: (): string => {
-        throw new Error("vellumRoot is not available in the Vellum Runtime subprocess");
+        throw new Error("vellumRoot is not available in the Vellum Runtime worker");
       },
       runtimeMode: () => runtimeMode,
     },
@@ -74,7 +74,7 @@ export function createSubprocessHost(args: SubprocessHostArgs): SkillHost {
       llm: {
         getConfigured: async () => null,
         userMessage: (): never => {
-          throw new Error("llm.userMessage is not available in the Vellum Runtime subprocess");
+          throw new Error("llm.userMessage is not available in the Vellum Runtime worker");
         },
         extractToolUse: () => null,
         createTimeout: (ms: number) => {
@@ -90,10 +90,10 @@ export function createSubprocessHost(args: SubprocessHostArgs): SkillHost {
       },
       tts: {
         get: (): never => {
-          throw new Error("tts is not available in the Vellum Runtime subprocess");
+          throw new Error("tts is not available in the Vellum Runtime worker");
         },
         resolveConfig: (): never => {
-          throw new Error("tts is not available in the Vellum Runtime subprocess");
+          throw new Error("tts is not available in the Vellum Runtime worker");
         },
       },
       secureKeys: {
@@ -102,7 +102,7 @@ export function createSubprocessHost(args: SubprocessHostArgs): SkillHost {
     },
     memory: {
       // Transcripts reach the conversation daemon-side via the transcript
-      // flush; nothing in the subprocess writes conversation rows.
+      // flush; nothing in the worker writes conversation rows.
       addMessage: async () => undefined,
       wakeAgentForOpportunity: async () => undefined,
     },

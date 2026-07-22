@@ -19,7 +19,7 @@ apps/meeting-bot-dashboard/  workspace-panel app (compiled React under src/) for
 skills/meeting-bot/  join/leave skill with scripts       (run as standalone bun processes; branch on config.provider)
 skills/meeting-bot-setup/  setup skill with reload script (guides user through credential setup)
 src/                 internals (config, recall client, realtime server, store, app routes/settings)
-src/vellum/          the Vellum Runtime: subprocess + supervisor, with the vendored
+src/vellum/          the Vellum Runtime: worker process + supervisor, with the vendored
                      meet adapter under src/vellum/meet (see src/vellum/meet/AGENTS.md).
                      Meet is the first adapter; other video-call platforms will slot
                      in behind the same runtime.

@@ -12,12 +12,12 @@ slot in behind the same runtime.
 contracts/           bot <-> daemon event + command schemas
 daemon/              session manager, runners (docker/direct), audio ingest,
                      event routing/publishing, optional sub-modules
-src/                 ingress listener/server, tool runtime slot,
-                     browser-stack bootstrap
+src/                 tool runtime slot, browser-stack bootstrap
 routes/              meet-internal.ts only: the bot-event ingress route,
-                     served by the ingress listener inside the Vellum Runtime
-                     subprocess (per-meeting bearer tokens). Join/leave
-                     control lives on the subprocess's own loopback server,
+                     served by the in-process ingress
+                     (src/vellum/ingress.ts, one level up) inside the Vellum
+                     Runtime worker (per-meeting bearer tokens). Join/leave
+                     control lives on the worker's own loopback server,
                      not in route files.
 bot/                 the containerized bot (Chromium + extension + Pulse/Xvfb);
                      its own package, built via bot/Dockerfile (context: this dir)
@@ -36,30 +36,38 @@ config-schema.ts     services.meet config schema (read from
 
 ## Integration seams (owned by meeting-bot, not this tree)
 
-- `src/vellum/subprocess.ts` (one level up) runs this subsystem in its own OS
-  process: backend probe, ingress listener over `routes/` here, the session
+- `src/vellum/worker.ts` (one level up) runs this subsystem in its own OS
+  process (`vellum-worker` in `assistant ps`): backend probe, the in-process
+  ingress (`src/vellum/ingress.ts`) over `routes/` here, the session
   manager with the optional sub-modules (consent, storage, TTS, lip-sync,
   barge-in, proactive chat) replaced by no-op factories via
   `MeetSessionManagerDeps`, and a loopback control server for join/leave.
-- `src/vellum/runtime.ts` supervises the subprocess from the daemon and
+  The vendored two-process ingress pair (`src/ingress-listener.ts` spawning
+  `src/ingress-server.ts` over a stdio relay) is deleted: that split kept
+  the TCP server out of meet-join's daemon, but here the whole runtime is
+  already its own process, so the ingress binds and dispatches in-process.
+- `src/vellum/runtime.ts` supervises the worker from the daemon and
   adapts relayed events into meeting-bot's session store and transcript-flush
   pipeline (`handleVellumMeetEvent`). meet-join's own conversation bridge is
   not used.
-- The join/leave skill scripts call the subprocess's control endpoint (port
-  in `data/vellum-control.json`; loopback-only, internal, no token).
+- The join/leave skill scripts call the worker's control endpoint at
+  `127.0.0.1:listenPort` (read from resolved-config.json; loopback-only,
+  internal, no token).
 
 ## Local adaptations from the source repo
 
 Kept intentionally minimal so diffs against meet-join history stay readable:
 
-- Seven type-level fixes to compile under meeting-bot's stricter tsconfig
+- Type-level fixes to compile under meeting-bot's stricter tsconfig
   (`noUncheckedIndexedAccess`, narrower closure analysis):
   `daemon/chat-opportunity-detector.ts`, `daemon/consent-monitor.ts`,
-  `src/ingress-listener.ts` (two casts), `routes/meet-internal.ts`,
-  `src/target-meeting.ts`, `meet-controller-ext/src/features/chat.ts`.
+  `routes/meet-internal.ts`, `src/target-meeting.ts`,
+  `meet-controller-ext/src/features/chat.ts`.
+- `src/ingress-listener.ts` and `src/ingress-server.ts` are deleted,
+  replaced by the in-process `src/vellum/ingress.ts` (see Integration seams).
 - `src/plugin-api-host.ts` and `src/plugin-runtime.ts` are deleted: the
-  Vellum Runtime subprocess builds its own SkillHost
-  (`src/vellum/subprocess-host.ts`), and any future daemon-side needs call
+  Vellum Runtime worker builds its own SkillHost
+  (`src/vellum/worker-host.ts`), and any future daemon-side needs call
   `@vellumai/plugin-api` methods directly instead of going through a bridge.
   This also removed the last import of the deprecated `assistantEventHub`.
 - Type-level fixes in the vendored `__tests__` so the whole tree typechecks

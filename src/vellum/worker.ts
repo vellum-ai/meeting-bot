@@ -1,11 +1,13 @@
 /**
- * Vellum Runtime subprocess entry point.
+ * Vellum Runtime worker entry point.
  *
  * Runs as a standalone Bun process spawned by the daemon-side supervisor
- * (`src/vellum/runtime.ts`). Everything heavyweight in the Vellum Runtime
- * lives here, out of the daemon's event loop: the meet session manager (which
- * spawns and supervises one bot per meeting), the bot-event ingress listener,
- * and the loopback control server the join/leave skill scripts call.
+ * (`src/vellum/runtime.ts`); shows up as `vellum-worker` in `assistant ps`.
+ * Everything heavyweight in the Vellum Runtime lives here, out of the
+ * daemon's event loop, and all of it in this one process: the meet session
+ * manager (which spawns and supervises one bot per meeting), the in-process
+ * bot-event ingress (`src/vellum/ingress.ts`), and the loopback control
+ * server the join/leave skill scripts call.
  *
  * ## Protocol (stdout → daemon, one JSON object per line)
  *
@@ -31,7 +33,10 @@
  *
  * ## Control server
  *
- * Binds 127.0.0.1 on an ephemeral port. Internal-only (loopback plus the
+ * Binds 127.0.0.1 on `config.listenPort` (the same knob the Recall realtime
+ * receiver uses; only one provider runtime runs at a time, so there is no
+ * clash). The skill scripts read the port from resolved-config.json, so
+ * both sides always agree on it. Internal-only (loopback plus the
  * daemon-supervised lifecycle), so requests are not token-authenticated:
  *
  *   POST /join  {"meetingUrl": "...", "conversationId": "..."|null}
@@ -57,10 +62,10 @@ import {
 } from "./meet/daemon/session-manager.ts";
 import { getMeetConfig } from "./meet/meet-config.ts";
 import { ensureBrowserStack } from "./meet/src/ensure-browser-stack.ts";
-import { startMeetIngressListener } from "./meet/src/ingress-listener.ts";
 import { setMeetHost } from "./meet/src/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
-import { createSubprocessHost, type SendToParent } from "./subprocess-host.ts";
+import { startMeetIngress } from "./ingress.ts";
+import { createWorkerHost, type SendToParent } from "./worker-host.ts";
 
 import type { MeetingBotConfig } from "../config.ts";
 
@@ -69,7 +74,7 @@ export const MEET_URL_REGEX =
   /^https:\/\/meet\.google\.com\/[a-z]{3,4}-?[a-z]{4}-?[a-z]{3,4}(?:\?.*)?$/i;
 
 /** Spawn argument the supervisor passes as base64 JSON in argv[2]. */
-export interface VellumSubprocessArgs {
+export interface VellumWorkerArgs {
   config: MeetingBotConfig;
   workspaceDir: string;
   assistantName: string | null;
@@ -127,15 +132,15 @@ function jsonResponse(body: unknown, status = 200): Response {
 async function main(): Promise<void> {
   const encoded = process.argv[2];
   if (!encoded) {
-    send({ type: "log", level: "error", msg: "missing subprocess argument" });
+    send({ type: "log", level: "error", msg: "missing worker argument" });
     process.exit(1);
   }
   const args = JSON.parse(
     Buffer.from(encoded, "base64").toString("utf-8"),
-  ) as VellumSubprocessArgs;
+  ) as VellumWorkerArgs;
 
   const sendToParent: SendToParent = send;
-  const host = createSubprocessHost({
+  const host = createWorkerHost({
     workspaceDir: args.workspaceDir,
     assistantName: args.assistantName,
     runtimeMode: args.runtimeMode,
@@ -156,12 +161,10 @@ async function main(): Promise<void> {
   }
 
   // Bot-event ingress, serving the route files under meet/routes (only the
-  // meet-internal bot ingress lives there).
+  // meet-internal bot ingress lives there). Runs in-process: no extra OS
+  // process, so `assistant ps` shows a single vellum-worker.
   const routesDir = new URL("./meet/routes", import.meta.url).pathname;
-  const ingress = await startMeetIngressListener(
-    host.logger.get("ingress"),
-    routesDir,
-  );
+  const ingress = startMeetIngress(host.logger.get("ingress"), routesDir);
 
   createEventPublisher(host);
 
@@ -188,10 +191,12 @@ async function main(): Promise<void> {
     ...noopSubModuleDeps(),
   });
 
-  // Loopback control server for the join/leave skill scripts.
+  // Loopback control server for the join/leave skill scripts. Binds the
+  // configured listenPort so the scripts can derive the port from
+  // resolved-config.json instead of a separately published file.
   const control = Bun.serve({
     hostname: "127.0.0.1",
-    port: 0,
+    port: args.config.listenPort,
     fetch: async (req) => {
       const path = new URL(req.url).pathname.replace(/\/+$/, "");
       if (req.method !== "POST") {
