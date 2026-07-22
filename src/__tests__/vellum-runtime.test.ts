@@ -168,3 +168,71 @@ describe("MEET_URL_REGEX", () => {
     expect(MEET_URL_REGEX.test("http://meet.google.com/abc-defg-hij")).toBe(false);
   });
 });
+
+describe("handleVellumHubMessage", () => {
+  const { mkdtempSync } = require("node:fs") as typeof import("node:fs");
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const { join } = require("node:path") as typeof import("node:path");
+
+  test("meet.* lifecycle messages build the durable history", async () => {
+    const { handleVellumHubMessage } = await import("../vellum/runtime.ts");
+    const { readMeetingHistory } = await import("../meeting-history.ts");
+    const dir = mkdtempSync(join(tmpdir(), "meeting-bot-hub-"));
+
+    handleVellumHubMessage(
+      { type: "meet.joining", meetingId: "m1", url: "https://meet.google.com/abc-defg-hij" },
+      noopLogger,
+      dir,
+    );
+    expect(readMeetingHistory(dir)[0]).toMatchObject({
+      botId: "m1",
+      provider: "vellum",
+      status: "joining",
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+    });
+
+    handleVellumHubMessage({ type: "meet.joined", meetingId: "m1" }, noopLogger, dir);
+    expect(readMeetingHistory(dir)[0]).toMatchObject({ status: "joined" });
+
+    handleVellumHubMessage(
+      { type: "meet.left", meetingId: "m1", reason: "user_request" },
+      noopLogger,
+      dir,
+    );
+    expect(readMeetingHistory(dir)[0]).toMatchObject({
+      status: "left",
+      detail: "user_request",
+    });
+  });
+
+  test("meet.error marks the attempt failed with its detail", async () => {
+    const { handleVellumHubMessage } = await import("../vellum/runtime.ts");
+    const { readMeetingHistory } = await import("../meeting-history.ts");
+    const dir = mkdtempSync(join(tmpdir(), "meeting-bot-hub-"));
+
+    handleVellumHubMessage(
+      { type: "meet.joining", meetingId: "m2", url: "u" },
+      noopLogger,
+      dir,
+    );
+    handleVellumHubMessage(
+      { type: "meet.error", meetingId: "m2", detail: "bot did not connect" },
+      noopLogger,
+      dir,
+    );
+    expect(readMeetingHistory(dir)[0]).toMatchObject({
+      status: "failed",
+      detail: "bot did not connect",
+    });
+  });
+
+  test("non-lifecycle and malformed messages change nothing", async () => {
+    const { handleVellumHubMessage } = await import("../vellum/runtime.ts");
+    const { readMeetingHistory } = await import("../meeting-history.ts");
+    const dir = mkdtempSync(join(tmpdir(), "meeting-bot-hub-"));
+
+    handleVellumHubMessage({ type: "meet.transcript_chunk", meetingId: "m3" }, noopLogger, dir);
+    handleVellumHubMessage({ type: "meet.joined" }, noopLogger, dir);
+    expect(readMeetingHistory(dir)).toEqual([]);
+  });
+});

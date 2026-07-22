@@ -76,6 +76,18 @@ provider-agnostic. The join/leave skill scripts detect the provider and the
 control port from the resolved config and command the runtime over that
 loopback endpoint (internal-only, so no token).
 
+Joining is asynchronous end to end: the control server acknowledges the
+attempt immediately, the spawn and in-call admission run in the background
+(up to 2 minutes before the runtime rolls the bot back), and the join
+script polls the worker's `/status` endpoint until the outcome is known,
+reporting joined, failed (with the reason), or still-pending. Join
+attempts, failures, and successes are recorded durably in
+`data/history.json` and shown with statuses in the dashboard's meeting
+history. In direct (non-Docker) mode, the browser stack the bot needs is
+installed asynchronously at worker boot (plugin init and provider
+switches); a join can wait for an in-flight install but never triggers
+one.
+
 Meeting audio is transcribed through the assistant's configured STT provider
 (`services.stt.provider`): the daemon opens streaming sessions via the
 plugin-api `openTranscriptionSession` and relays audio and transcript events

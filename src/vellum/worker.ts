@@ -39,11 +39,24 @@
  * both sides always agree on it. Internal-only (loopback plus the
  * daemon-supervised lifecycle), so requests are not token-authenticated:
  *
- *   POST /join  {"meetingUrl": "...", "conversationId": "..."|null}
- *   POST /leave {"meetingId": "..."}
+ *   POST /join   {"meetingUrl": "...", "conversationId": "..."|null}
+ *       Validates and returns {meetingId, status: "joining"} immediately;
+ *       the spawn + in-call admission (up to two minutes) runs async. The
+ *       join script polls /status for the outcome.
+ *   GET  /status?meetingId=...
+ *       {meetingId, state: "joining"|"joined"|"failed"|"left", detail?}
+ *   POST /leave  {"meetingId": "..."}
  *
  * The bot-event ingress (`meet-internal`) keeps its per-meeting bearer
  * tokens: it binds beyond loopback so Docker bots can reach it.
+ *
+ * ## Browser stack (direct backend)
+ *
+ * With no Docker engine, the bot runs as a direct child process and needs
+ * chromium/Xvfb/PulseAudio/ffmpeg on the host. That install starts here at
+ * boot (so it happens at plugin init and provider switches), runs async so
+ * readiness is never delayed, and the join flow awaits its completion, so
+ * a join can wait for an in-flight install but never triggers one.
  */
 
 import { randomUUID } from "node:crypto";
@@ -61,10 +74,11 @@ import {
   type MeetSessionManagerDeps,
 } from "./meet/daemon/session-manager.ts";
 import { getMeetConfig } from "./meet/meet-config.ts";
-import { ensureBrowserStack } from "./meet/src/ensure-browser-stack.ts";
 import { setMeetHost } from "./meet/src/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
+import { ensureBrowserStack } from "./browser-stack.ts";
 import { startMeetIngress } from "./ingress.ts";
+import { createJoinStatusTracker } from "./join-status.ts";
 import { createWorkerSttRelay } from "./stt-relay.ts";
 import { createWorkerHost, type SendToParent } from "./worker-host.ts";
 
@@ -152,12 +166,16 @@ async function main(): Promise<void> {
   const sttRelay = createWorkerSttRelay(send, (msg) =>
     send({ type: "log", level: "warn", msg: `[stt-relay] ${msg}` }),
   );
+  // Join outcomes for the /status endpoint, fed by the meet.* hub messages
+  // the session manager publishes through the host's events facet.
+  const joinStatus = createJoinStatusTracker();
   const host = createWorkerHost({
     workspaceDir: args.workspaceDir,
     assistantName: args.assistantName,
     runtimeMode: args.runtimeMode,
     send: sendToParent,
     openSttSession: () => sttRelay.open(),
+    onHubMessage: (message) => joinStatus.applyHubMessage(message),
   });
   setMeetHost(host);
   const log = host.logger.get("vellum-runtime");
@@ -169,9 +187,12 @@ async function main(): Promise<void> {
   const backend = dockerAvailable ? "docker" : "direct";
   setMeetBotBackend(backend);
   log.info(`meet bot backend selected: ${backend}`, { socketPath });
-  if (backend === "direct") {
-    ensureBrowserStack(host.logger.get("browser-stack"));
-  }
+  // Direct backend: install the browser stack now (init / provider switch),
+  // asynchronously so readiness is not delayed. Joins await this promise.
+  const browserStackReady: Promise<void> =
+    backend === "direct"
+      ? ensureBrowserStack(host.logger.get("browser-stack"))
+      : Promise.resolve();
 
   // Bot-event ingress, serving the route files under meet/routes (only the
   // meet-internal bot ingress lives there). Runs in-process: no extra OS
@@ -211,7 +232,19 @@ async function main(): Promise<void> {
     hostname: "127.0.0.1",
     port: args.config.listenPort,
     fetch: async (req) => {
-      const path = new URL(req.url).pathname.replace(/\/+$/, "");
+      const url = new URL(req.url);
+      const path = url.pathname.replace(/\/+$/, "");
+
+      if (path === "/status" && req.method === "GET") {
+        const meetingId = url.searchParams.get("meetingId") ?? "";
+        if (!meetingId) {
+          return jsonResponse({ error: "meetingId query parameter is required" }, 400);
+        }
+        const status = joinStatus.get(meetingId);
+        if (!status) return jsonResponse({ error: "unknown meetingId" }, 404);
+        return jsonResponse(status);
+      }
+
       if (req.method !== "POST") {
         return jsonResponse({ error: "method not allowed" }, 405);
       }
@@ -243,26 +276,36 @@ async function main(): Promise<void> {
           .join(args.assistantName ?? "Vellum");
 
         const meetingId = randomUUID();
-        try {
-          await sessionManager.join({
-            url: meetingUrl,
-            meetingId,
-            conversationId: conversationId ?? "",
-            consentMessage,
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return jsonResponse({ error: `failed to join meeting: ${message}` }, 502);
-        }
+        joinStatus.set(meetingId, "joining");
 
-        send({
-          type: "session",
-          action: "opened",
-          meetingId,
-          meetingUrl,
-          conversationId,
-          startedAt: Date.now(),
-        });
+        // The join itself (browser-stack wait, container spawn, bot audio
+        // handshake) can take minutes, so it runs async: the response goes
+        // out immediately and the join script polls /status for the
+        // outcome. meet.joined/meet.error hub events advance the tracker.
+        void (async () => {
+          await browserStackReady;
+          try {
+            await sessionManager.join({
+              url: meetingUrl,
+              meetingId,
+              conversationId: conversationId ?? "",
+              consentMessage,
+            });
+            send({
+              type: "session",
+              action: "opened",
+              meetingId,
+              meetingUrl,
+              conversationId,
+              startedAt: Date.now(),
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            joinStatus.set(meetingId, "failed", message);
+            log.error("meet join failed", { meetingId, error: message });
+          }
+        })();
+
         return jsonResponse({ meetingId, status: "joining" });
       }
 

@@ -479,7 +479,10 @@ export class MeetAudioIngest {
         });
         reject(
           new Error(
-            `MeetAudioIngest: bot did not connect to *:${boundPort} within ${this.botConnectTimeoutMs}ms`,
+            `MeetAudioIngest: bot did not connect to *:${boundPort} within ${this.botConnectTimeoutMs}ms ` +
+              "(this audio-ingest port is ephemeral by design and handed to the bot as " +
+              "DAEMON_AUDIO_PORT; no connection usually means the bot process or container " +
+              "never launched, or crashed at startup)",
           ),
         );
       }, this.botConnectTimeoutMs);
