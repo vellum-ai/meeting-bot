@@ -28,7 +28,11 @@ Do NOT trigger on:
 
 ## How to join
 
-Run the join script with the meeting URL and the current conversation ID:
+Run the join script with the meeting URL and the current conversation ID.
+IMPORTANT: invoke it with a 3-minute timeout (180000 ms, longer than the
+default). The script waits for the bot to actually enter the call before
+reporting the outcome, and admission can take up to 2 minutes; a shorter
+timeout kills the script mid-wait and hides the result.
 
 ```bash
 bun skills/meeting-bot/scripts/join.ts --meeting-url "https://meet.google.com/abc-defg-hij" --conversation-id "<current conversation id>"
@@ -36,7 +40,7 @@ bun skills/meeting-bot/scripts/join.ts --meeting-url "https://meet.google.com/ab
 
 The script reads the plugin's resolved config, resolves the Recall API key from the credential store, creates the bot, and registers the session. Recall.ai handles joining the call and begins streaming live transcript and participant events to the plugin's realtime receiver.
 
-After creating the bot, the script polls Recall to confirm the bot actually enters the call, so a silent join failure (invalid or expired URL, locked meeting, admission denied) is reported instead of looking like success. If the bot is still waiting to be admitted, the script reports that it was created but has not entered the call yet.
+After creating the bot, the script confirms the bot actually enters the call (polling Recall for the recall provider, or the Vellum Runtime's status endpoint for the vellum provider), so a silent join failure (invalid or expired URL, locked meeting, admission denied, bot spawn failure) is reported with its reason instead of looking like success. Only treat the join as successful when the script says the bot is in the call. If the bot is still waiting to be admitted when the wait window closes, the script reports that it was created but has not entered the call yet.
 
 The script outputs the bot id. Keep it to leave later.
 

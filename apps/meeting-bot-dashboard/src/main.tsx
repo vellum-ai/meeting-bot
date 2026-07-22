@@ -54,6 +54,11 @@ const STYLES = `
   th { font-weight: 600; opacity: 0.7; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .url { word-break: break-all; }
+  .history-status { font-size: 12px; white-space: nowrap; }
+  .history-joined, .history-active { color: color-mix(in srgb, green 70%, CanvasText); }
+  .history-failed { color: color-mix(in srgb, red 70%, CanvasText); }
+  .history-joining, .history-left { opacity: 0.75; }
+  .history-detail { font-size: 11px; opacity: 0.7; word-break: break-word; max-width: 260px; }
   .empty { opacity: 0.6; padding: 16px 2px; }
   .readonly {
     margin-top: 16px; padding-top: 12px;
@@ -102,6 +107,31 @@ interface Meeting {
   meetingUrl: string;
   conversationId: string | null;
   startedAt: number;
+  provider?: string;
+  status?: string;
+  detail?: string;
+}
+
+/**
+ * Human label per history status. "joining" is deliberately shown as an
+ * attempt: the entry exists from the moment a join is requested, before the
+ * bot is confirmed in the call.
+ */
+function statusLabel(m: Meeting): string {
+  switch (m.status) {
+    case "joining":
+      return "join attempt";
+    case "joined":
+      return "joined";
+    case "failed":
+      return "failed";
+    case "left":
+      return "left";
+    case "active":
+      return "active";
+    default:
+      return "-";
+  }
 }
 
 function formatTime(ms: number): string {
@@ -329,6 +359,7 @@ function MeetingHistory() {
             <tr>
               <th>Started</th>
               <th>Meeting</th>
+              <th>Status</th>
               <th>Bot</th>
               <th>Conversation</th>
             </tr>
@@ -338,6 +369,14 @@ function MeetingHistory() {
               <tr key={m.botId}>
                 <td>{formatTime(m.startedAt)}</td>
                 <td className="url">{m.meetingUrl || "-"}</td>
+                <td>
+                  <span className={`history-status history-${m.status || "unknown"}`}>
+                    {statusLabel(m)}
+                  </span>
+                  {m.status === "failed" && m.detail ? (
+                    <div className="history-detail">{m.detail}</div>
+                  ) : null}
+                </td>
                 <td className="mono">{m.botId || "-"}</td>
                 <td className="mono">{m.conversationId || "-"}</td>
               </tr>

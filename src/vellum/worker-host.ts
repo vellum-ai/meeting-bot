@@ -58,6 +58,12 @@ export interface WorkerHostArgs {
    * to null and joins fail with the audio ingest's descriptive error.
    */
   openSttSession?: () => Promise<StreamingTranscriber | null>;
+  /**
+   * Worker-local tap on published hub messages (meet.joining/joined/error/
+   * left and friends). The join-status tracker uses it to follow join
+   * outcomes without a second event subscription.
+   */
+  onHubMessage?: (message: Record<string, unknown>) => void;
 }
 
 /** Build the SkillHost the Vellum Runtime worker hands to the vendored subsystem. */
@@ -124,8 +130,16 @@ export function createWorkerHost(args: WorkerHostArgs): SkillHost {
       wakeAgentForOpportunity: async () => undefined,
     },
     events: {
+      // Relay the event's message body to the daemon as a structured `hub`
+      // line (the daemon updates meeting history from meet.* kinds) and to
+      // the local tap (the join-status tracker).
       publish: async (event) => {
-        send({ type: "log", level: "debug", msg: "hub event", meta: event });
+        const message = (event as { message?: unknown }).message;
+        if (message && typeof message === "object") {
+          const body = message as Record<string, unknown>;
+          send({ type: "hub", message: body });
+          args.onHubMessage?.(body);
+        }
       },
       subscribe: () => ({ dispose: () => {}, active: false }),
       buildEvent: (message, conversationId) =>

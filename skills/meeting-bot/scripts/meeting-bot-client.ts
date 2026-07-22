@@ -332,6 +332,44 @@ export async function vellumControlPost(
   return parsed;
 }
 
+/** Join status reported by the worker's /status endpoint. */
+export interface VellumJoinStatus {
+  state: "joining" | "joined" | "failed" | "left";
+  detail?: string;
+}
+
+/**
+ * Poll the Vellum Runtime worker for a meeting's join status. Returns null
+ * when the status cannot be read (worker restarting, unknown id); callers
+ * treat that as "still pending" and keep polling.
+ */
+export async function vellumJoinStatus(
+  meetingId: string,
+): Promise<VellumJoinStatus | null> {
+  const port = getResolvedConfig().listenPort;
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${port}/status?meetingId=${encodeURIComponent(meetingId)}`,
+    );
+    if (!res.ok) return null;
+    const parsed = (await res.json()) as { state?: unknown; detail?: unknown };
+    if (
+      parsed.state !== "joining" &&
+      parsed.state !== "joined" &&
+      parsed.state !== "failed" &&
+      parsed.state !== "left"
+    ) {
+      return null;
+    }
+    return {
+      state: parsed.state,
+      ...(typeof parsed.detail === "string" ? { detail: parsed.detail } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Read all sessions from the sessions file. Returns an empty array if the file does not exist. */
 export function readSessions(): SessionEntry[] {
   const path = sessionsFilePath();

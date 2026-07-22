@@ -72,6 +72,13 @@ Kept intentionally minimal so diffs against meet-join history stay readable:
   `meet-controller-ext/src/features/chat.ts`.
 - `src/ingress-listener.ts` and `src/ingress-server.ts` are deleted,
   replaced by the in-process `src/vellum/ingress.ts` (see Integration seams).
+- `src/ensure-browser-stack.ts` is deleted, replaced by the async
+  `src/vellum/browser-stack.ts`: the execSync install blocked the worker's
+  boot (and therefore readiness and the first join) for up to three
+  minutes; the async version starts at boot and the join path awaits it.
+- `daemon/audio-ingest.ts`: the bot-connect timeout error message is
+  extended to say the audio port is ephemeral by design and that no
+  connection usually means the bot never launched.
 - `src/plugin-api-host.ts` and `src/plugin-runtime.ts` are deleted: the
   Vellum Runtime worker builds its own SkillHost
   (`src/vellum/worker-host.ts`), and any future daemon-side needs call

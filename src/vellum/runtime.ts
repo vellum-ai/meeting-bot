@@ -38,6 +38,7 @@ import type { InitContext } from "@vellumai/plugin-api";
 
 import type { MeetingBotConfig } from "../config.ts";
 import { resolveAssistantName } from "../identity.ts";
+import { upsertHistoryEntry } from "../meeting-history.ts";
 import { pluginDataDir } from "../plugin-paths.ts";
 import {
   clearTranscriptBuffer,
@@ -175,6 +176,62 @@ export function handleVellumMeetEvent(
   }
 }
 
+/**
+ * Apply one relayed hub message (the session manager's meet.* events) to
+ * the durable meeting history, so the app shows join attempts, failures,
+ * and successes rather than only live sessions. Exported for unit tests.
+ */
+export function handleVellumHubMessage(
+  message: Record<string, unknown>,
+  logger: Logger,
+  dataDir: string = pluginDataDir(),
+): void {
+  const meetingId = typeof message.meetingId === "string" ? message.meetingId : "";
+  if (!meetingId) return;
+
+  switch (message.type) {
+    case "meet.joining": {
+      upsertHistoryEntry(dataDir, {
+        botId: meetingId,
+        provider: "vellum",
+        status: "joining",
+        meetingUrl: typeof message.url === "string" ? message.url : "",
+      });
+      return;
+    }
+    case "meet.joined": {
+      upsertHistoryEntry(dataDir, { botId: meetingId, provider: "vellum", status: "joined" });
+      logger.info({ meetingId }, "meeting-bot: vellum bot joined the meeting");
+      return;
+    }
+    case "meet.error": {
+      const detail =
+        typeof message.detail === "string" ? message.detail : "unknown error";
+      upsertHistoryEntry(dataDir, {
+        botId: meetingId,
+        provider: "vellum",
+        status: "failed",
+        detail,
+      });
+      logger.warn({ meetingId, detail }, "meeting-bot: vellum meet join/session error");
+      return;
+    }
+    case "meet.left": {
+      upsertHistoryEntry(dataDir, {
+        botId: meetingId,
+        provider: "vellum",
+        status: "left",
+        ...(typeof message.reason === "string" ? { detail: message.reason } : {}),
+      });
+      return;
+    }
+    default:
+      // Other meet.* kinds (transcript, participants, speakers) do not
+      // change history.
+      return;
+  }
+}
+
 /** Handle one JSON-lines message relayed from the worker. */
 function handleWorkerMessage(
   msg: Record<string, unknown>,
@@ -216,6 +273,13 @@ function handleWorkerMessage(
       });
       return;
     }
+    case "hub": {
+      const message = msg.message;
+      if (message && typeof message === "object") {
+        handleVellumHubMessage(message as Record<string, unknown>, state.logger);
+      }
+      return;
+    }
     case "session": {
       const meetingId = typeof msg.meetingId === "string" ? msg.meetingId : "";
       if (!meetingId) return;
@@ -225,6 +289,15 @@ function handleWorkerMessage(
           typeof msg.conversationId === "string" ? msg.conversationId : null;
         openSession(meetingId, meetingUrl, conversationId, "vellum");
         persistSessionEntry({
+          botId: meetingId,
+          meetingUrl,
+          conversationId,
+          startedAt: typeof msg.startedAt === "number" ? msg.startedAt : Date.now(),
+          provider: "vellum",
+        });
+        // Enrich the history entry (created at meet.joining) with the
+        // conversation id and authoritative start time.
+        upsertHistoryEntry(pluginDataDir(), {
           botId: meetingId,
           meetingUrl,
           conversationId,

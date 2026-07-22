@@ -27,7 +27,17 @@ import {
   RecallApiError,
   removeSession,
   vellumControlPost,
+  vellumJoinStatus,
 } from "./meeting-bot-client.ts";
+
+/**
+ * How long to wait for a vellum join outcome. Covers the runtime's 2-minute
+ * bot-connect rollback with headroom; invoke the script with a 3-minute
+ * timeout (see SKILL.md) so this wait is never cut short.
+ */
+const VELLUM_JOIN_WAIT_MS = 150_000;
+/** Interval between /status polls. */
+const VELLUM_POLL_INTERVAL_MS = 5_000;
 
 interface Args {
   meetingUrl: string;
@@ -192,22 +202,54 @@ async function main(): Promise<void> {
   // short-lived script). Command it over the local control endpoint; the
   // daemon registers and persists the session itself.
   if (config.provider === "vellum") {
-    console.error(`Joining ${meetingUrl} via the vellum meet bot...`);
+    console.error(`Requesting a vellum meet bot for ${meetingUrl}...`);
+    let meetingId = "";
     try {
       const result = await vellumControlPost("join", {
         meetingUrl,
         conversationId,
       });
-      const meetingId = String(result.meetingId ?? "");
-      console.log(`Vellum meet bot ${meetingId} is joining ${meetingUrl}.`);
-      console.log(
-        `Live transcript events will stream into the meeting session.`,
-      );
-      console.log(`Use leave.ts with this id to end it: --bot-id ${meetingId}`);
+      meetingId = String(result.meetingId ?? "");
     } catch (err) {
-      console.error(`Failed to join: ${String(err)}`);
+      console.error(`Failed to start the join: ${String(err)}`);
       process.exit(1);
     }
+
+    // The join request only starts the attempt: the bot still has to spawn
+    // and be admitted to the call, which can take up to 2 minutes before the
+    // runtime rolls it back and reports failure. Poll the worker's /status
+    // until the outcome is known so a failed join never reads as success.
+    console.error(
+      `Join attempt ${meetingId} started; waiting for the bot to enter the call (up to 2 minutes)...`,
+    );
+    const deadline = Date.now() + VELLUM_JOIN_WAIT_MS;
+    let lastState = "joining";
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, VELLUM_POLL_INTERVAL_MS));
+      const status = await vellumJoinStatus(meetingId);
+      if (!status) continue;
+      lastState = status.state;
+      if (status.state === "joined") {
+        console.log(`Vellum meet bot ${meetingId} is in the call at ${meetingUrl}.`);
+        console.log(`Live transcript events will stream into the meeting session.`);
+        console.log(`Use leave.ts with this id to end it: --bot-id ${meetingId}`);
+        return;
+      }
+      if (status.state === "failed") {
+        console.error(`Join failed: ${status.detail ?? "unknown error"}`);
+        process.exit(1);
+      }
+      if (status.state === "left") {
+        console.error(
+          `The bot left before the join completed${status.detail ? ` (${status.detail})` : ""}.`,
+        );
+        process.exit(1);
+      }
+    }
+    console.log(
+      `Vellum meet bot ${meetingId} was created but has not entered the call yet (last state: ${lastState}). ` +
+        `It may still be admitted; check the meeting history in the app, or abort with leave.ts --bot-id ${meetingId}.`,
+    );
     return;
   }
 
