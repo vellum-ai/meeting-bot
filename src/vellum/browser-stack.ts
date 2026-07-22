@@ -77,23 +77,40 @@ async function hasAptGet(): Promise<boolean> {
   return hasBinary("apt-get");
 }
 
-/**
- * Probe for the direct-mode browser stack and install missing pieces when
- * apt-get is available. Resolves when the stack is known-present, known
- * unobtainable, or the install attempt finished (either way); never
- * rejects. Callers that need the stack (the join path) await the promise;
- * callers that do not (readiness) simply never await it.
- */
-export async function ensureBrowserStack(log: Logger): Promise<void> {
+/** Outcome of the probe-and-install pass, consumed by the join gate. */
+export interface BrowserStackStatus {
+  /** True when every required binary is present. */
+  ok: boolean;
+  /** Binaries still missing after the probe (and any install attempt). */
+  missing: string[];
+  /** Human-readable reason when not ok. */
+  detail?: string;
+}
+
+async function probeMissing(): Promise<string[]> {
   const missing: string[] = [];
   for (const binary of REQUIRED_BINARIES) {
     if (!(await hasBinary(binary))) missing.push(binary);
   }
+  return missing;
+}
+
+/**
+ * Probe for the direct-mode browser stack and install missing pieces when
+ * apt-get is available. Resolves with the final status once the stack is
+ * known-present, known unobtainable, or the install attempt finished;
+ * never rejects. The worker awaits this in the join path and fails the
+ * join fast with the status detail when the stack is unusable, instead of
+ * spawning a bot that dies mid-setup (e.g. pulse-setup.sh exit 127 when
+ * pulseaudio never made it onto PATH).
+ */
+export async function ensureBrowserStack(log: Logger): Promise<BrowserStackStatus> {
+  const missing = await probeMissing();
   if (missing.length === 0) {
     log.info(
       "meeting-bot: browser stack present (chromium, Xvfb, xdotool, pulseaudio, ffmpeg)",
     );
-    return;
+    return { ok: true, missing: [] };
   }
 
   log.warn("meeting-bot: missing browser stack binaries for direct mode", {
@@ -101,17 +118,18 @@ export async function ensureBrowserStack(log: Logger): Promise<void> {
   });
 
   if (!(await hasAptGet())) {
-    log.warn(
-      "meeting-bot: apt-get not found, cannot auto-install. Install these packages manually: " +
-        APT_PACKAGES.join(", "),
-    );
-    return;
+    const detail =
+      "apt-get not found, cannot auto-install. Install these packages manually: " +
+      APT_PACKAGES.join(", ");
+    log.warn(`meeting-bot: ${detail}`);
+    return { ok: false, missing, detail };
   }
 
   log.info(
     "meeting-bot: installing browser stack via apt-get (this can take a few minutes)...",
   );
 
+  let installError: string | null = null;
   try {
     await execAsync("apt-get update", { timeout: APT_UPDATE_TIMEOUT_MS });
     await execAsync(
@@ -119,11 +137,25 @@ export async function ensureBrowserStack(log: Logger): Promise<void> {
       { timeout: APT_INSTALL_TIMEOUT_MS },
     );
     await execAsync("rm -rf /var/lib/apt/lists/*").catch(() => undefined);
-    log.info("meeting-bot: browser stack installed successfully");
   } catch (err) {
-    log.error(
-      "meeting-bot: browser stack installation failed, the bot will not be able to join meetings in direct mode",
-      { error: err instanceof Error ? err.message : String(err) },
-    );
+    installError = err instanceof Error ? err.message : String(err);
   }
+
+  // Re-probe rather than trusting the install exit code: a partially
+  // successful run may have delivered everything we need, and a "clean"
+  // run can still leave a binary off PATH.
+  const stillMissing = await probeMissing();
+  if (stillMissing.length === 0) {
+    log.info("meeting-bot: browser stack installed successfully");
+    return { ok: true, missing: [] };
+  }
+
+  const detail = installError
+    ? `apt-get install failed: ${installError.slice(0, 300)}`
+    : "apt-get reported success but required binaries are still missing";
+  log.error(
+    "meeting-bot: browser stack unavailable, the bot cannot join meetings in direct mode",
+    { missing: stillMissing, detail },
+  );
+  return { ok: false, missing: stillMissing, detail };
 }

@@ -12,6 +12,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  handleMeetingLogGet,
   handleMeetingsGet,
   handleProviderPost,
   handleSettingsGet,
@@ -32,6 +33,26 @@ describe("handleMeetingsGet", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/json");
     expect(Array.isArray(await res.json())).toBe(true);
+  });
+});
+
+describe("handleMeetingLogGet", () => {
+  function logGet(botId: string): Request {
+    return new Request(
+      `http://x/x/plugins/meeting-bot/meeting-log?botId=${encodeURIComponent(botId)}`,
+    );
+  }
+
+  test("rejects a non-UUID id with 400 (doubles as traversal guard)", () => {
+    expect(handleMeetingLogGet(logGet("../../secrets")).status).toBe(400);
+    expect(handleMeetingLogGet(logGet("")).status).toBe(400);
+  });
+
+  test("returns 404 for a valid id with no captured log", () => {
+    const res = handleMeetingLogGet(
+      logGet("00000000-0000-4000-8000-000000000000"),
+    );
+    expect(res.status).toBe(404);
   });
 });
 

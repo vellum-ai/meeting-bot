@@ -8,6 +8,9 @@
  * path and are where the value-precise unit tests live.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { getConversation } from "@vellumai/plugin-api";
 
 import {
@@ -65,6 +68,33 @@ export async function handleMeetingsGet(): Promise<Response> {
         : {}),
     })),
   );
+}
+
+/**
+ * `GET /x/plugins/meeting-bot/meeting-log?botId=...`: the captured bot log
+ * for one meeting, read from `data/meets/<botId>/bot.log` (written by the
+ * Vellum Runtime at join rollback and at leave). 404 when no log was
+ * captured; 400 on a missing or malformed id.
+ */
+export function handleMeetingLogGet(request: Request): Response {
+  const botId = new URL(request.url).searchParams.get("botId") ?? "";
+  // Meeting ids are UUIDs; the strict shape check doubles as a path
+  // traversal guard since the id lands in a filesystem path.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) {
+    return json({ error: "botId must be a meeting UUID" }, 400);
+  }
+  const path = join(pluginDataDir(), "meets", botId, "bot.log");
+  if (!existsSync(path)) {
+    return json({ error: "no bot log captured for this meeting" }, 404);
+  }
+  try {
+    return new Response(readFileSync(path, "utf-8"), {
+      status: 200,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  } catch (err) {
+    return json({ error: `failed to read bot log: ${String(err).slice(0, 200)}` }, 500);
+  }
 }
 
 /**

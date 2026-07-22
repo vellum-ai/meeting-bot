@@ -60,6 +60,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
 import type { MeetBotEvent } from "./meet/contracts/index.ts";
 import {
@@ -92,6 +93,12 @@ export const MEET_URL_REGEX =
 export interface VellumWorkerArgs {
   config: MeetingBotConfig;
   workspaceDir: string;
+  /**
+   * The plugin's data directory. Everything the runtime writes (the
+   * per-meeting artifact dirs under data/meets, including bot.log) stays
+   * under it.
+   */
+  dataDir: string;
   assistantName: string | null;
   runtimeMode: DaemonRuntimeMode;
 }
@@ -189,10 +196,10 @@ async function main(): Promise<void> {
   log.info(`meet bot backend selected: ${backend}`, { socketPath });
   // Direct backend: install the browser stack now (init / provider switch),
   // asynchronously so readiness is not delayed. Joins await this promise.
-  const browserStackReady: Promise<void> =
+  const browserStackReady =
     backend === "direct"
       ? ensureBrowserStack(host.logger.get("browser-stack"))
-      : Promise.resolve();
+      : Promise.resolve({ ok: true as const, missing: [] as string[] });
 
   // Bot-event ingress, serving the route files under meet/routes (only the
   // meet-internal bot ingress lives there). Runs in-process: no extra OS
@@ -204,6 +211,10 @@ async function main(): Promise<void> {
 
   const sessionManager = createMeetSessionManager(host, {
     resolveDaemonUrl: () => ingress.urlForBackend(getMeetBotBackend()),
+    // Per-meeting artifacts (bot.log, out/) go under the plugin's data
+    // directory instead of <workspace>/meets, so everything the runtime
+    // writes stays inside the plugin's designated storage.
+    resolveMeetingsRoot: () => join(args.dataDir, "meets"),
     resolveAssistantDisplayName: () => args.assistantName,
     // Relay every meeting event to the daemon, which owns the session store
     // and the transcript-flush pipeline.
@@ -283,7 +294,32 @@ async function main(): Promise<void> {
         // out immediately and the join script polls /status for the
         // outcome. meet.joined/meet.error hub events advance the tracker.
         void (async () => {
-          await browserStackReady;
+          // Preflight: with the direct backend, refuse to spawn a bot when
+          // the browser stack never became available. Spawning anyway used
+          // to die deep inside the bot (pulse-setup.sh exit 127 when
+          // pulseaudio was absent) with a far less actionable error.
+          const stack = await browserStackReady;
+          if (!stack.ok) {
+            const message =
+              `cannot join: the direct-mode browser stack is unavailable ` +
+              `(missing: ${stack.missing.join(", ")}). ${stack.detail ?? ""}`.trim();
+            joinStatus.set(meetingId, "failed", message);
+            log.error("meet join refused: browser stack unavailable", {
+              meetingId,
+              missing: stack.missing,
+            });
+            // Mirror the session manager's hub events so the daemon's
+            // durable history records this attempt and its failure.
+            send({
+              type: "hub",
+              message: { type: "meet.joining", meetingId, url: meetingUrl },
+            });
+            send({
+              type: "hub",
+              message: { type: "meet.error", meetingId, detail: message },
+            });
+            return;
+          }
           try {
             await sessionManager.join({
               url: meetingUrl,
