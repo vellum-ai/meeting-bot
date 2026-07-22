@@ -45,3 +45,43 @@ describe("augmentedPath", () => {
     expect(augmentedPath("", [extra])).toBe(extra);
   });
 });
+
+describe("libraryCandidates / pulseModuleDir", () => {
+  const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+
+  function fakeRoot(): string {
+    const root = tmp();
+    mkdirSync(join(root, "usr/lib/x86_64-linux-gnu/pulseaudio"), { recursive: true });
+    mkdirSync(join(root, "usr/lib/x86_64-linux-gnu/pulse-17.0/modules"), { recursive: true });
+    mkdirSync(join(root, "usr/local/lib"), { recursive: true });
+    return root;
+  }
+
+  test("returns only existing lib dirs, including pulseaudio's private subdir", async () => {
+    const { libraryCandidates } = await import("../path-env.ts");
+    const root = fakeRoot();
+    const dirs = libraryCandidates(root);
+    expect(dirs).toContain(join(root, "usr/lib/x86_64-linux-gnu"));
+    expect(dirs).toContain(join(root, "usr/lib/x86_64-linux-gnu/pulseaudio"));
+    expect(dirs).toContain(join(root, "usr/local/lib"));
+    expect(dirs).not.toContain(join(root, "usr/lib/aarch64-linux-gnu"));
+  });
+
+  test("finds pulseaudio's relocated module directory", async () => {
+    const { pulseModuleDir } = await import("../path-env.ts");
+    const root = fakeRoot();
+    expect(pulseModuleDir(root)).toBe(
+      join(root, "usr/lib/x86_64-linux-gnu/pulse-17.0/modules"),
+    );
+    expect(pulseModuleDir(tmp())).toBeNull();
+  });
+
+  test("prependedLibraryPath puts relocated dirs first without duplicating", async () => {
+    const { prependedLibraryPath } = await import("../path-env.ts");
+    const a = tmp();
+    const b = tmp();
+    expect(prependedLibraryPath("/sys/lib", [a, b])).toBe(`${a}:${b}:/sys/lib`);
+    expect(prependedLibraryPath(`${a}:/sys/lib`, [a, b])).toBe(`${b}:${a}:/sys/lib`);
+    expect(prependedLibraryPath(undefined, [a])).toBe(a);
+  });
+});

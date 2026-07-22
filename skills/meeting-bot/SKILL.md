@@ -67,9 +67,10 @@ an environment change), reload it:
 bun skills/meeting-bot/scripts/reload.ts
 ```
 
-This bounces the plugin so the configured provider runtime (Recall receiver
-or Vellum Runtime) tears down and restarts. Switching providers does not need
-this; the dashboard's provider control restarts runtimes on its own.
+This restarts the configured provider runtime (Recall receiver or Vellum
+Runtime) live and reports the outcome before returning, so the reload is
+effective on the current conversation turn. Switching providers does not
+need this; the dashboard's provider control restarts runtimes on its own.
 
 ## Supported platforms
 

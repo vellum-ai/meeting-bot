@@ -27,9 +27,20 @@ import {
   setResolvedConfig,
 } from "../src/plugin-state.ts";
 import {
+  restartProviderRuntime,
   startProviderRuntime,
   writeResolvedConfigFile,
 } from "../src/provider-runtime.ts";
+import { startReloadWatcher, type ReloadWatcher } from "../src/reload-watcher.ts";
+import { pluginDataDir } from "../src/plugin-paths.ts";
+
+let reloadWatcher: ReloadWatcher | null = null;
+
+/** Stop the reload watcher (called from the shutdown hook). */
+export function stopReloadWatcher(): void {
+  reloadWatcher?.stop();
+  reloadWatcher = null;
+}
 
 const init = async (ctx: InitContext): Promise<void> => {
   const { config, warnings } = resolveConfig(ctx.config);
@@ -70,6 +81,17 @@ const init = async (ctx: InitContext): Promise<void> => {
   // for the default "recall". Shared with the provider route so a live
   // provider switch runs exactly the same code (src/provider-runtime.ts).
   await startProviderRuntime(ctx, config);
+
+  // Serve reload requests from the reload skill script: it writes a request
+  // file into data/ and this watcher restarts the provider runtime live and
+  // writes the outcome back, so a reload completes on the conversation turn
+  // that asked for it (see src/reload-watcher.ts).
+  stopReloadWatcher();
+  reloadWatcher = startReloadWatcher({
+    dataDir: pluginDataDir(),
+    restart: restartProviderRuntime,
+    logger: ctx.logger,
+  });
 };
 
 export default init;

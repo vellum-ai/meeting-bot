@@ -20,8 +20,8 @@
  * entries always keep priority.
  */
 
-import { existsSync } from "node:fs";
-import { delimiter } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { delimiter, join } from "node:path";
 
 /**
  * Directories that commonly hold the binaries the runtime needs but are
@@ -59,15 +59,142 @@ export function augmentedPath(
 }
 
 /**
- * Augment this process's own PATH in place. Returns the directories that
- * were added (empty when the PATH was already complete), so callers can
- * log the outcome.
+ * Root of the assistant's relocated apt install (the kata sandbox installs
+ * system packages under this prefix instead of /). Matches the assistant's
+ * own `VELLUM_APT_DATA_ROOT` convention.
  */
-export function augmentProcessPath(): string[] {
-  const before = process.env.PATH ?? "";
-  const after = augmentedPath(before);
-  if (after === before) return [];
-  const beforeSet = new Set(before.split(delimiter));
-  process.env.PATH = after;
-  return after.split(delimiter).filter((p) => !beforeSet.has(p));
+function aptDataRoot(): string {
+  const fromEnv = process.env.VELLUM_APT_DATA_ROOT?.trim();
+  return fromEnv && fromEnv.length > 0 ? fromEnv : "/data/system";
+}
+
+/** Multiarch triplets we probe under the relocated root. */
+const LIB_ARCHES = ["x86_64-linux-gnu", "aarch64-linux-gnu"] as const;
+
+/**
+ * Shared-library directories under the relocated apt root, mirroring the
+ * assistant's own shell env (usr/lib/<arch>, usr/lib, usr/local/lib) plus
+ * pulseaudio's PRIVATE lib subdir: libpulsecore lives in
+ * `usr/lib/<arch>/pulseaudio/`, normally found via the binary's baked
+ * RUNPATH, which points at the non-relocated /usr path and therefore
+ * breaks under the apt root. Only directories that exist are returned.
+ */
+export function libraryCandidates(root: string = aptDataRoot()): string[] {
+  const dirs: string[] = [];
+  for (const arch of LIB_ARCHES) dirs.push(join(root, "usr/lib", arch));
+  dirs.push(join(root, "usr/lib"), join(root, "usr/local/lib"));
+  for (const arch of LIB_ARCHES) dirs.push(join(root, "usr/lib", arch, "pulseaudio"));
+  return dirs.filter((d) => existsSync(d));
+}
+
+/**
+ * Locate pulseaudio's dlopen module directory under the relocated root
+ * (`usr/lib[/<arch>]/pulse-<version>/modules`). The daemon's compile-time
+ * module path points at the non-relocated /usr tree, so the bot passes
+ * this via `pulseaudio --dl-search-path` (see media/pulse-setup.sh).
+ */
+export function pulseModuleDir(root: string = aptDataRoot()): string | null {
+  const parents = [
+    ...LIB_ARCHES.map((arch) => join(root, "usr/lib", arch)),
+    join(root, "usr/lib"),
+  ];
+  for (const parent of parents) {
+    if (!existsSync(parent)) continue;
+    let names: string[];
+    try {
+      names = readdirSync(parent);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.startsWith("pulse-")) continue;
+      const modules = join(parent, name, "modules");
+      if (existsSync(modules)) return modules;
+    }
+  }
+  return null;
+}
+
+/**
+ * Return `current` with any missing library candidates PREPENDED (unlike
+ * PATH, relocated libraries must win over same-named system libraries so a
+ * relocated binary never mislinks against an older system copy; this
+ * mirrors the assistant's own env script, which prepends too).
+ */
+export function prependedLibraryPath(
+  current: string | undefined,
+  candidates: readonly string[] = libraryCandidates(),
+): string {
+  const existing = (current ?? "").split(delimiter).filter((p) => p.length > 0);
+  const present = new Set(existing);
+  const front = candidates.filter((d) => !present.has(d));
+  return [...front, ...existing].join(delimiter);
+}
+
+/** What {@link augmentProcessEnv} changed, for logging. */
+export interface AugmentedEnv {
+  addedPathDirs: string[];
+  addedLibDirs: string[];
+  pulseModuleDir: string | null;
+}
+
+/**
+ * Augment this process's env in place: PATH (well-known bin dirs appended),
+ * LD_LIBRARY_PATH (relocated lib dirs prepended), and PULSE_DL_SEARCH_PATH
+ * (pulseaudio's relocated module dir, consumed by the bot's
+ * pulse-setup.sh). Returns what changed so callers can log it.
+ */
+export function augmentProcessEnv(): AugmentedEnv {
+  const result: AugmentedEnv = {
+    addedPathDirs: [],
+    addedLibDirs: [],
+    pulseModuleDir: null,
+  };
+
+  const pathBefore = process.env.PATH ?? "";
+  const pathAfter = augmentedPath(pathBefore);
+  if (pathAfter !== pathBefore) {
+    const beforeSet = new Set(pathBefore.split(delimiter));
+    process.env.PATH = pathAfter;
+    result.addedPathDirs = pathAfter
+      .split(delimiter)
+      .filter((p) => !beforeSet.has(p));
+  }
+
+  const libBefore = process.env.LD_LIBRARY_PATH ?? "";
+  const libAfter = prependedLibraryPath(libBefore);
+  if (libAfter !== libBefore) {
+    const beforeSet = new Set(libBefore.split(delimiter));
+    process.env.LD_LIBRARY_PATH = libAfter;
+    result.addedLibDirs = libAfter
+      .split(delimiter)
+      .filter((p) => !beforeSet.has(p));
+  }
+
+  const modules = pulseModuleDir();
+  if (modules && !process.env.PULSE_DL_SEARCH_PATH) {
+    process.env.PULSE_DL_SEARCH_PATH = modules;
+    result.pulseModuleDir = modules;
+  }
+
+  return result;
+}
+
+/**
+ * A copy of `base` with the same augmentations applied, for handing to a
+ * spawned child without mutating this process (the supervisor uses this
+ * when spawning the worker).
+ */
+export function augmentedSpawnEnv(
+  base: NodeJS.ProcessEnv = process.env,
+): Record<string, string | undefined> {
+  const modules = pulseModuleDir();
+  return {
+    ...base,
+    PATH: augmentedPath(base.PATH),
+    LD_LIBRARY_PATH: prependedLibraryPath(base.LD_LIBRARY_PATH),
+    ...(modules && !base.PULSE_DL_SEARCH_PATH
+      ? { PULSE_DL_SEARCH_PATH: modules }
+      : {}),
+  };
 }

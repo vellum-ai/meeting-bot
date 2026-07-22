@@ -51,7 +51,7 @@ export function getApiKey(): string {
  * The script lives at <plugin-root>/skills/meeting-bot/scripts/meeting-bot-client.ts.
  * The data directory is at <plugin-root>/data/.
  */
-function findPluginDataDir(): string {
+export function findPluginDataDir(): string {
   // `new URL(".", import.meta.url).pathname` is already the directory that
   // contains this script (skills/meeting-bot/scripts/, with a trailing slash).
   // Do NOT wrap it in dirname(): that drops the "scripts" segment and

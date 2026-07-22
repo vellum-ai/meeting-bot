@@ -39,7 +39,7 @@ import type { InitContext } from "@vellumai/plugin-api";
 import type { MeetingBotConfig } from "../config.ts";
 import { resolveAssistantName } from "../identity.ts";
 import { upsertHistoryEntry } from "../meeting-history.ts";
-import { augmentedPath } from "../path-env.ts";
+import { augmentedSpawnEnv } from "../path-env.ts";
 import { pluginDataDir } from "../plugin-paths.ts";
 import {
   clearTranscriptBuffer,
@@ -346,11 +346,12 @@ export function initVellumRuntime(
 
     const child = spawn(process.execPath, [scriptPath, encoded], {
       stdio: ["pipe", "pipe", "pipe"],
-      // The daemon's PATH can be a stripped-down non-login-shell PATH
-      // missing e.g. /data/system/bin; hand the worker an augmented one so
-      // its binary probes and every bot it spawns can find the browser
-      // stack (see src/path-env.ts).
-      env: { ...process.env, PATH: augmentedPath(process.env.PATH) },
+      // The daemon's env can carry a stripped-down non-login-shell PATH
+      // (missing e.g. /data/system/bin) and no LD_LIBRARY_PATH for the
+      // relocated apt root's shared libraries; hand the worker a fully
+      // augmented env so its binary probes, the dynamic loader, and every
+      // bot it spawns can find the browser stack (see src/path-env.ts).
+      env: augmentedSpawnEnv(),
     });
 
     const state: RunningRuntime = {
