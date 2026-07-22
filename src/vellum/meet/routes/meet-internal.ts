@@ -57,7 +57,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { SkillHost } from "../plugin-host.js";
 import { z } from "zod";
 
-import { getMeetHost } from "../src/tool-runtime.js";
+import { getMeetHost } from "../tool-runtime.js";
 
 import { MeetBotEventSchema } from "../contracts/index.js";
 import {

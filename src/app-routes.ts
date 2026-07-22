@@ -8,6 +8,8 @@
  * path and are where the value-precise unit tests live.
  */
 
+import { getConversation } from "@vellumai/plugin-api";
+
 import {
   applyConfigUpdate,
   applyProviderChange,
@@ -26,9 +28,43 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** `GET /x/plugins/meeting-bot/meetings`: meeting history, newest first. */
-export function handleMeetingsGet(): Response {
-  return json(readMeetingHistory(pluginDataDir()));
+/**
+ * `GET /x/plugins/meeting-bot/meetings`: meeting history, newest first.
+ * Entries with a conversation id are enriched with `conversationTitle`
+ * resolved through the host's conversation store, so the app can render a
+ * titled link instead of a UUID. Resolution is best-effort: a deleted
+ * conversation, a null title, or a store error just leaves the field off.
+ */
+export async function handleMeetingsGet(): Promise<Response> {
+  const entries = readMeetingHistory(pluginDataDir());
+
+  const ids = [
+    ...new Set(
+      entries
+        .map((e) => e.conversationId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ];
+  const titles = new Map<string, string>();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const row = await getConversation(id);
+        if (row?.title) titles.set(id, row.title);
+      } catch {
+        // Host store unavailable (tests, old host) or conversation gone.
+      }
+    }),
+  );
+
+  return json(
+    entries.map((e) => ({
+      ...e,
+      ...(e.conversationId && titles.has(e.conversationId)
+        ? { conversationTitle: titles.get(e.conversationId) }
+        : {}),
+    })),
+  );
 }
 
 /**

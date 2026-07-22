@@ -24,7 +24,7 @@ import {
   type AvatarRenderer,
   type VisemeEvent,
   type Y4MFrame,
-} from "../src/media/avatar/index.js";
+} from "../media/avatar/index.js";
 
 /**
  * Minimal in-memory `AvatarRenderer` implementation. Records everything

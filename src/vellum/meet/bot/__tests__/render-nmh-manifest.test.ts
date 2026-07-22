@@ -133,7 +133,7 @@ describe("render integration", () => {
     };
     expect(parsed.name).toBe("com.vellum.meet");
     expect(parsed.type).toBe("stdio");
-    expect(parsed.path).toBe("/app/bot/src/native-messaging/nmh-shim.ts");
+    expect(parsed.path).toBe("/app/bot/native-messaging/nmh-shim.ts");
     expect(parsed.allowed_origins).toEqual([`chrome-extension://${extId}/`]);
   });
 });

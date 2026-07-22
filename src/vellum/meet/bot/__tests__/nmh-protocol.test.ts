@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createFrameReader,
   encodeFrame,
-} from "../src/native-messaging/nmh-protocol.js";
+} from "../native-messaging/nmh-protocol.js";
 
 describe("nmh-protocol", () => {
   test("encode → read round-trips an object", () => {

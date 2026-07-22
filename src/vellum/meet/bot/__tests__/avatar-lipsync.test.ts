@@ -35,15 +35,15 @@ import type {
   BotAvatarPushVisemeCommand,
   ExtensionToBotMessage,
 } from "../../contracts/native-messaging.js";
-import type { AvatarNativeMessagingSender } from "../src/media/avatar/index.js";
-import { TalkingHeadRenderer } from "../src/media/avatar/talking-head/renderer.js";
+import type { AvatarNativeMessagingSender } from "../media/avatar/index.js";
+import { TalkingHeadRenderer } from "../media/avatar/talking-head/renderer.js";
 import {
   __resetForTests as resetAudioPlayback,
   startAudioPlayback,
   stopAudioPlayback,
   type PacatWritable,
   type SpawnedPacat,
-} from "../src/media/audio-playback.js";
+} from "../media/audio-playback.js";
 
 // ---------------- helpers ------------------------------------------------
 

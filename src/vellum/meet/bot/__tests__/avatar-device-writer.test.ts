@@ -23,7 +23,7 @@ import {
   attachDeviceWriter,
   DEFAULT_MAX_FPS,
   type Y4MFrame,
-} from "../src/media/avatar/index.js";
+} from "../media/avatar/index.js";
 
 import { FakeAvatarRenderer } from "./avatar-interface.test.js";
 

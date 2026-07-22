@@ -16,7 +16,7 @@
 
 import type { ToolDefinition, ToolExecutionResult } from "@vellumai/plugin-api";
 
-import type { RiskLevel, SkillHost } from "../plugin-host.js";
+import type { RiskLevel, SkillHost } from "./plugin-host.js";
 
 let currentHost: SkillHost | null = null;
 

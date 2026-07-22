@@ -26,7 +26,7 @@
 import {
   LeaveCommandSchema,
   SendChatCommandSchema,
-} from "../../../contracts/index.js";
+} from "../../contracts/index.js";
 import { Hono, type Context } from "hono";
 import { randomUUID } from "node:crypto";
 

@@ -5,14 +5,23 @@
  * `react` / `react-dom` onto `preact/compat`, so this is ordinary React. It
  * talks to the plugin's routes under `/x/plugins/meeting-bot/`.
  *
- * The Configuration view shows the whole plugin config. A few fields are
+ * Two views, routed by local state (the panel iframe is sandboxed, so no
+ * URL/hash routing): the home view (Configuration + Meeting history) and a
+ * dedicated per-meeting page opened by clicking a history row.
+ *
+ * The Configuration card shows the whole plugin config. A few fields are
  * editable (voice mode, provider, region); the rest are shown read-only.
+ * Meeting history is filtered to the currently configured provider and
+ * paginated.
  */
 
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 const BASE = "/x/plugins/meeting-bot";
+
+/** History rows shown per page. */
+const PAGE_SIZE = 10;
 
 /**
  * All of the app's styling. Kept here rather than in index.html so the HTML
@@ -39,6 +48,14 @@ const STYLES = `
   .row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
   .row label { flex: 1; }
   select { font: inherit; padding: 6px 8px; border-radius: 6px; }
+  button {
+    font: inherit; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+    background: transparent; color: inherit; cursor: pointer;
+  }
+  button:hover { background: color-mix(in srgb, CanvasText 8%, transparent); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  a { color: LinkText; }
   .field-status { font-size: 12px; margin-right: 8px; }
   .field-saving { opacity: 0.6; }
   .field-saved { color: color-mix(in srgb, green 70%, CanvasText); }
@@ -52,14 +69,22 @@ const STYLES = `
     vertical-align: top;
   }
   th { font-weight: 600; opacity: 0.7; }
+  tbody tr.clickable { cursor: pointer; }
+  tbody tr.clickable:hover { background: color-mix(in srgb, CanvasText 6%, transparent); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .url { word-break: break-all; }
+  .empty { opacity: 0.6; padding: 16px 2px; }
   .history-status { font-size: 12px; white-space: nowrap; }
   .history-joined, .history-active { color: color-mix(in srgb, green 70%, CanvasText); }
   .history-failed { color: color-mix(in srgb, red 70%, CanvasText); }
   .history-joining, .history-left { opacity: 0.75; }
   .history-detail { font-size: 11px; opacity: 0.7; word-break: break-word; max-width: 260px; }
-  .empty { opacity: 0.6; padding: 16px 2px; }
+  .pager {
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 10px; padding-top: 10px; font-size: 12px;
+  }
+  .pager .count { opacity: 0.7; }
+  .back { margin-bottom: 14px; }
   .readonly {
     margin-top: 16px; padding-top: 12px;
     border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
@@ -106,10 +131,21 @@ interface Meeting {
   botId: string;
   meetingUrl: string;
   conversationId: string | null;
+  conversationTitle?: string;
   startedAt: number;
+  updatedAt?: number;
   provider?: string;
   status?: string;
   detail?: string;
+}
+
+function formatTime(ms: number | undefined): string {
+  if (!ms) return "-";
+  try {
+    return new Date(ms).toLocaleString();
+  } catch {
+    return String(ms);
+  }
 }
 
 /**
@@ -134,44 +170,66 @@ function statusLabel(m: Meeting): string {
   }
 }
 
-function formatTime(ms: number): string {
-  if (!ms) return "-";
+/**
+ * Best-effort URL for the assistant's conversation page. The panel iframe is
+ * sandboxed without a navigation bridge, so the link opens in a new tab; the
+ * host origin is recovered from document.referrer when available.
+ */
+function conversationHref(id: string): string {
+  const path = `/assistant/conversations/${id}`;
   try {
-    return new Date(ms).toLocaleString();
+    if (document.referrer) return new URL(path, document.referrer).toString();
   } catch {
-    return String(ms);
+    // fall through to the relative path
   }
+  return path;
 }
 
-/** Rows of read-only config shown below the editable fields. */
-function readOnlyRows(config: ConfigView): Array<[string, string]> {
-  return [
-    ["Public WS URL", config.publicWsUrl || "(not set)"],
-    ["Listen port", config.listenPort != null ? String(config.listenPort) : "-"],
-    ["Transcript mode", config.transcript?.mode || "-"],
-  ];
+/** Link text for a conversation: its title, else a shortened id. */
+function conversationLabel(m: Meeting): string {
+  if (m.conversationTitle) return m.conversationTitle;
+  return m.conversationId ? `${m.conversationId.slice(0, 8)}…` : "-";
+}
+
+function ConversationLink({ meeting }: { meeting: Meeting }) {
+  if (!meeting.conversationId) return <>-</>;
+  return (
+    <a
+      href={conversationHref(meeting.conversationId)}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {conversationLabel(meeting)}
+    </a>
+  );
+}
+
+function StatusCell({ meeting }: { meeting: Meeting }) {
+  return (
+    <>
+      <span className={`history-status history-${meeting.status || "unknown"}`}>
+        {statusLabel(meeting)}
+      </span>
+      {meeting.status === "failed" && meeting.detail ? (
+        <div className="history-detail">{meeting.detail}</div>
+      ) : null}
+    </>
+  );
 }
 
 /** Per-field save state: which field is in flight, and the last outcome. */
 type FieldState = "idle" | "saving" | "saved" | "error";
 
-function Configuration() {
-  const [config, setConfig] = useState<ConfigView | null>(null);
+function Configuration({
+  config,
+  setConfig,
+}: {
+  config: ConfigView | null;
+  setConfig: (c: ConfigView) => void;
+}) {
   const [fieldState, setFieldState] = useState<Record<string, FieldState>>({});
   const [providerNote, setProviderNote] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    vfetch(`${BASE}/settings`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((c: ConfigView | null) => {
-        if (c && !cancelled) setConfig(c);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   function setField(field: string, state: FieldState) {
     setFieldState((prev) => ({ ...prev, [field]: state }));
@@ -258,6 +316,15 @@ function Configuration() {
 
   const busy = (field: string) => fieldState[field] === "saving";
 
+  /** Rows of read-only config shown below the editable fields. */
+  function readOnlyRows(c: ConfigView): Array<[string, string]> {
+    return [
+      ["Public WS URL", c.publicWsUrl || "(not set)"],
+      ["Listen port", c.listenPort != null ? String(c.listenPort) : "-"],
+      ["Transcript mode", c.transcript?.mode || "-"],
+    ];
+  }
+
   return (
     <section>
       <h2>Configuration</h2>
@@ -330,11 +397,139 @@ function Configuration() {
   );
 }
 
-function MeetingHistory() {
+function MeetingHistory({
+  provider,
+  meetings,
+  onSelect,
+}: {
+  provider: Provider | null;
+  meetings: Meeting[] | null;
+  onSelect: (m: Meeting) => void;
+}) {
+  const [page, setPage] = useState(0);
+
+  // History is scoped to the provider currently configured; entries
+  // recorded before providers existed count as recall.
+  const filtered = (meetings ?? []).filter(
+    (m) => provider === null || (m.provider ?? "recall") === provider,
+  );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount - 1);
+  const rows = filtered.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
+
+  return (
+    <section>
+      <h2>Meeting history</h2>
+      <div className="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Started</th>
+              <th>Meeting</th>
+              <th>Status</th>
+              <th>Conversation</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((m) => (
+              <tr
+                key={m.botId}
+                className="clickable"
+                onClick={() => onSelect(m)}
+              >
+                <td>{formatTime(m.startedAt)}</td>
+                <td className="url">{m.meetingUrl || "-"}</td>
+                <td>
+                  <StatusCell meeting={m} />
+                </td>
+                <td>
+                  <ConversationLink meeting={m} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {meetings !== null && filtered.length === 0 ? (
+          <div className="empty">
+            No meetings recorded yet
+            {provider ? ` for the ${provider} provider` : ""}.
+          </div>
+        ) : null}
+        {filtered.length > PAGE_SIZE ? (
+          <div className="pager">
+            <span className="count">
+              {filtered.length} meetings, page {current + 1} of {pageCount}
+            </span>
+            <button
+              disabled={current === 0}
+              onClick={() => setPage(current - 1)}
+            >
+              Previous
+            </button>
+            <button
+              disabled={current >= pageCount - 1}
+              onClick={() => setPage(current + 1)}
+            >
+              Next
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/** Dedicated page for one meeting, opened by clicking its history row. */
+function MeetingDetail({
+  meeting,
+  onBack,
+}: {
+  meeting: Meeting;
+  onBack: () => void;
+}) {
+  const facts: Array<[string, React.ReactNode]> = [
+    ["Meeting URL", <span className="url">{meeting.meetingUrl || "-"}</span>],
+    ["Status", <StatusCell meeting={meeting} />],
+    ["Provider", meeting.provider ?? "recall"],
+    ["Started", formatTime(meeting.startedAt)],
+    ["Last update", formatTime(meeting.updatedAt)],
+    ["Conversation", <ConversationLink meeting={meeting} />],
+    ["Meeting id", <span className="mono">{meeting.botId}</span>],
+  ];
+
+  return (
+    <section>
+      <button className="back" onClick={onBack}>
+        &larr; Back to history
+      </button>
+      <h2>Meeting</h2>
+      <div className="card">
+        <dl>
+          {facts.map(([label, value]) => (
+            <div className="dl-row" key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </section>
+  );
+}
+
+function App() {
+  const [config, setConfig] = useState<ConfigView | null>(null);
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
+  const [selected, setSelected] = useState<Meeting | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    vfetch(`${BASE}/settings`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c: ConfigView | null) => {
+        if (c && !cancelled) setConfig(c);
+      })
+      .catch(() => {});
     vfetch(`${BASE}/meetings`)
       .then((r) => (r.ok ? r.json() : []))
       .then((m: Meeting[]) => {
@@ -348,57 +543,23 @@ function MeetingHistory() {
     };
   }, []);
 
-  const rows = meetings ?? [];
-
-  return (
-    <section>
-      <h2>Meeting history</h2>
-      <div className="card">
-        <table>
-          <thead>
-            <tr>
-              <th>Started</th>
-              <th>Meeting</th>
-              <th>Status</th>
-              <th>Bot</th>
-              <th>Conversation</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m) => (
-              <tr key={m.botId}>
-                <td>{formatTime(m.startedAt)}</td>
-                <td className="url">{m.meetingUrl || "-"}</td>
-                <td>
-                  <span className={`history-status history-${m.status || "unknown"}`}>
-                    {statusLabel(m)}
-                  </span>
-                  {m.status === "failed" && m.detail ? (
-                    <div className="history-detail">{m.detail}</div>
-                  ) : null}
-                </td>
-                <td className="mono">{m.botId || "-"}</td>
-                <td className="mono">{m.conversationId || "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {meetings !== null && rows.length === 0 ? (
-          <div className="empty">No meetings recorded yet.</div>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function App() {
   return (
     <div className="app">
       <style>{STYLES}</style>
       <h1>Meeting Bot</h1>
       <p className="sub">Configuration and meeting history.</p>
-      <Configuration />
-      <MeetingHistory />
+      {selected ? (
+        <MeetingDetail meeting={selected} onBack={() => setSelected(null)} />
+      ) : (
+        <>
+          <Configuration config={config} setConfig={setConfig} />
+          <MeetingHistory
+            provider={config?.provider ?? null}
+            meetings={meetings}
+            onSelect={(m) => setSelected(m)}
+          />
+        </>
+      )}
     </div>
   );
 }

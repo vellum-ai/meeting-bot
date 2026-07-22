@@ -36,12 +36,12 @@ import { stat, open as fsOpen, type FileHandle } from "node:fs/promises";
 import type { WriteStream } from "node:fs";
 import type { Subprocess } from "bun";
 
-import { AVATAR_DEVICE_PATH_DEFAULT } from "../../../shared/avatar-device-path.js";
+import { AVATAR_DEVICE_PATH_DEFAULT } from "../../shared/avatar-device-path.js";
 
 /**
  * Default device path for the virtual camera — loaded by host modprobe.
  * Re-exports the shared
- * {@link ../../../shared/avatar-device-path.js AVATAR_DEVICE_PATH_DEFAULT}
+ * {@link ../../shared/avatar-device-path.js AVATAR_DEVICE_PATH_DEFAULT}
  * so this value stays locked to the launcher's `DEFAULT_AVATAR_DEVICE_PATH`,
  * the workspace config default, and the CLI's device-passthrough default.
  */

@@ -15,7 +15,7 @@ import type {
 import {
   createCameraChannel,
   DEFAULT_CAMERA_CHANNEL_TIMEOUT_MS,
-} from "../src/native-messaging/camera-channel.js";
+} from "../native-messaging/camera-channel.js";
 
 interface FakeSocket {
   sent: BotToExtensionMessage[];

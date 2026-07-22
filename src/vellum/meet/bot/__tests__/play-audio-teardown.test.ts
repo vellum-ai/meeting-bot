@@ -33,21 +33,21 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   createHttpServer,
   type HttpServerHandle,
-} from "../src/control/http-server.js";
-import { BotState } from "../src/control/state.js";
+} from "../control/http-server.js";
+import { BotState } from "../control/state.js";
 import {
   __resetForTests as resetPlaybackForTests,
   stopAudioPlayback,
   type PacatWritable,
   type SpawnedPacat,
-} from "../src/media/audio-playback.js";
+} from "../media/audio-playback.js";
 import type {
   AvatarCapabilities,
   AvatarRenderer,
   VisemeEvent,
   Y4MFrame,
-} from "../src/media/avatar/index.js";
-import type { VideoDeviceHandle } from "../src/media/video-device.js";
+} from "../media/avatar/index.js";
+import type { VideoDeviceHandle } from "../media/video-device.js";
 
 const API_TOKEN = "test-token-teardown";
 

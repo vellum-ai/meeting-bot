@@ -41,15 +41,15 @@ import {
   type AvatarNativeMessagingSender,
   type AvatarRendererDeps,
   type Y4MFrame,
-} from "../src/media/avatar/index.js";
+} from "../media/avatar/index.js";
 // Importing the talking-head module has the side effect of registering
 // the factory with the registry.
-import "../src/media/avatar/talking-head/index.js";
+import "../media/avatar/talking-head/index.js";
 import {
   TALKING_HEAD_RENDERER_ID,
   TalkingHeadRenderer,
   type JpegToY4mSpawnFactory,
-} from "../src/media/avatar/talking-head/renderer.js";
+} from "../media/avatar/talking-head/renderer.js";
 
 /**
  * Rebuild the talking-head factory registration after a sibling test

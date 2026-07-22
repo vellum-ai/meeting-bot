@@ -4,7 +4,7 @@
  * Implements the same surface the session manager uses from
  * {@link DockerRunner} (`run` / `stop` / `kill` / `remove` / `inspect` /
  * `logs` / `wait` / `listContainers`), but instead of spawning a container
- * per meeting it runs the bot entrypoint (`bot/src/main.ts`) as a child
+ * per meeting it runs the bot entrypoint (`bot/main.ts`) as a child
  * process of the assistant. The `init` hook selects this backend when no
  * Docker Engine is reachable (see `meet-backend.ts`).
  *
@@ -66,7 +66,7 @@ const NOOP_LOGGER: Logger = {
 
 /** Default resolver for the bot entrypoint, relative to this module. */
 function defaultBotMainPath(): string {
-  return fileURLToPath(new URL("../bot/src/main.ts", import.meta.url));
+  return fileURLToPath(new URL("../bot/main.ts", import.meta.url));
 }
 
 /** Allocate a free loopback TCP port by binding :0 and reading it back. */
@@ -90,7 +90,7 @@ function allocateEphemeralPort(hostIp: string): Promise<number> {
 export interface DirectBotRunnerOptions {
   /** Structured logger. Defaults to a no-op. */
   logger?: Logger;
-  /** Absolute path to `bot/src/main.ts`. Defaults to a module-relative resolve. */
+  /** Absolute path to `bot/main.ts`. Defaults to a module-relative resolve. */
   botMainPath?: string;
   /** Runtime binary that runs the bot entrypoint. Defaults to `"bun"`. */
   runtime?: string;

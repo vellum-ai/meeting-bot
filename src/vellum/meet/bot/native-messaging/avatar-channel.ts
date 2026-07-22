@@ -27,7 +27,7 @@ import type {
   ExtensionAvatarFrameMessage,
   ExtensionAvatarStartedMessage,
   ExtensionToBotMessage,
-} from "../../../contracts/native-messaging.js";
+} from "../../contracts/native-messaging.js";
 
 /**
  * Narrow slice of the inbound-message routing hook the channel needs.

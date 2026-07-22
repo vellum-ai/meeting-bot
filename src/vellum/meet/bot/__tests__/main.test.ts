@@ -25,8 +25,8 @@ import type {
   ExtensionToBotMessage,
 } from "../../contracts/native-messaging.js";
 
-import { runBot, type BotDeps, type DaemonClientLike } from "../src/main.js";
-import { BotState } from "../src/control/state.js";
+import { runBot, type BotDeps, type DaemonClientLike } from "../main.js";
+import { BotState } from "../control/state.js";
 
 /** -----------------------------------------------------------------------
  * Mock factory

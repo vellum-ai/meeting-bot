@@ -30,7 +30,7 @@ import {
   openVideoDevice,
   type SpawnedV4l2Ctl,
   type VideoFrameSink,
-} from "../src/media/video-device.js";
+} from "../media/video-device.js";
 
 interface SinkState {
   writes: Uint8Array[];

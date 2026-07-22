@@ -10,7 +10,7 @@ Why not CDP / a headless-automation library? Google Meet's BotGuard detects CDP 
 
 This package contains:
 
-- `src/main.ts` — process entry point. Boots PulseAudio, Xvfb, the NMH socket server, then spawns Chrome with the controller extension loaded. Waits for the extension's `ready` handshake, dispatches the `join` command, and stands up the HTTP control surface.
+- `main.ts` — process entry point. Boots PulseAudio, Xvfb, the NMH socket server, then spawns Chrome with the controller extension loaded. Waits for the extension's `ready` handshake, dispatches the `join` command, and stands up the HTTP control surface.
 - `src/browser/chrome-launcher.ts` — spawns `google-chrome-stable` as a plain subprocess with `--load-extension=/app/ext`. No CDP.
 - `src/browser/xvfb.ts` — virtual-display manager for headful Chrome.
 - `src/native-messaging/` — Chrome Native Messaging host: socket server + shim process that Chrome runs in response to `chrome.runtime.connectNative(...)`.
@@ -250,7 +250,7 @@ the meet subsystem, run this manual verification loop.
 - **Extension failed to connect to native host** — the most specific flavor
   of "bot never joins":
   - Verify `/etc/opt/chrome/native-messaging-hosts/com.vellum.meet.json`
-    contains `{"path": "/app/bot/src/native-messaging/nmh-shim.ts", ...}`
+    contains `{"path": "/app/bot/native-messaging/nmh-shim.ts", ...}`
     pointing at an existing, executable file.
   - Verify the manifest's `allowed_origins` includes the extension's origin
     (`chrome-extension://<ID>/`). The ID is derived deterministically from

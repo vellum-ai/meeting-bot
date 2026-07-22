@@ -8,7 +8,7 @@
  * skill can prompt the user for the specific meeting.
  */
 
-import { MeetSessionManager } from "../daemon/session-manager.js";
+import { MeetSessionManager } from "./daemon/session-manager.js";
 
 /**
  * Resolve the target meetingId from caller input + active sessions. Returns
