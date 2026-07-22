@@ -78,7 +78,9 @@ async function main(): Promise<void> {
   const sockets = new Set<ServerWebSocket<SocketData>>();
 
   const server = Bun.serve<SocketData, undefined>({
-    hostname: config.listenHost,
+    // Loopback only: the tunnel (or the operator's reverse proxy) forwards
+    // publicWsUrl onto this local port.
+    hostname: "127.0.0.1",
     port: config.listenPort,
     fetch(req, srv) {
       const url = new URL(req.url);

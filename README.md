@@ -61,19 +61,20 @@ visible in the assistant's process tree (`assistant ps`).
 ### The Vellum Runtime (`provider: "vellum"`)
 
 With `provider: "vellum"`, the init hook skips the Recall receiver and spawns
-the Vellum Runtime as its own subprocess (`src/vellum/subprocess.ts`,
-supervised by `src/vellum/runtime.ts`): the same isolation the Recall
-receiver gets, so bot supervision and event ingress never run on the daemon's
-event loop. Inside the subprocess live the Docker-or-direct bot backend
-probe, the ingress listener the bot POSTs events to, the meet session manager
-that spawns one bot per meeting, and a loopback control server. Bot
-transcript chunks, participant changes, and lifecycle transitions are relayed
-to the daemon over stdio and adapted into the same session store and
-debounced transcript flush the Recall path uses, so everything downstream
-(meeting history, conversation turns) is provider-agnostic. The join/leave
-skill scripts detect the provider from the resolved config and command the
-runtime over its loopback control endpoint (port published in
-`data/vellum-control.json`; internal-only, so no token). See
+the Vellum Runtime as its own worker process (`src/vellum/worker.ts`, shown
+as `vellum-worker` in `assistant ps`, supervised by `src/vellum/runtime.ts`):
+the same isolation the Recall receiver gets, so bot supervision and event
+ingress never run on the daemon's event loop. Everything lives in that one
+process: the Docker-or-direct bot backend probe, the in-process ingress the
+bot POSTs events to (`src/vellum/ingress.ts`), the meet session manager that
+spawns one bot per meeting, and a loopback control server on
+`127.0.0.1:listenPort`. Bot transcript chunks, participant changes, and
+lifecycle transitions are relayed to the daemon over stdio and adapted into
+the same session store and debounced transcript flush the Recall path uses,
+so everything downstream (meeting history, conversation turns) is
+provider-agnostic. The join/leave skill scripts detect the provider and the
+control port from the resolved config and command the runtime over that
+loopback endpoint (internal-only, so no token). See
 [`src/vellum/meet/AGENTS.md`](src/vellum/meet/AGENTS.md) for the vendored
 tree's layout, the bot image build, and which meet-join sub-modules are
 disabled.
@@ -143,11 +144,13 @@ assistant credentials set --service meeting-bot --field api_key "recall_..."
 
 At call time the plugin resolves it in-process via the host's `resolveCredential`.
 
-Notable optional fields: `region` (default `us-east-1`), `listenHost` /
-`listenPort` (where the realtime server binds locally), `verificationToken`
-(shared secret appended as `?token=…` and checked on each connection),
-`events` (which realtime events to subscribe to), and `transcript.*`
-(streaming provider settings).
+Notable optional fields: `region` (default `us-east-1`), `listenPort` (the
+local loopback port the active provider runtime listens on; always bound on
+`127.0.0.1`), `verificationToken` (shared secret appended as `?token=…` and
+checked on each connection), and `transcript.*` (streaming provider
+settings). The realtime event subscription is not configurable: the plugin
+always subscribes to the full set it supports (`REALTIME_EVENTS` in
+`src/config.ts`).
 
 ### Behavior flags
 
@@ -165,7 +168,7 @@ Notable optional fields: `region` (default `us-east-1`), `listenHost` /
 ### Local development
 
 Recall needs a stable public URL. In dev, put a static `ngrok` tunnel in front
-of `listenHost:listenPort` and set `publicWsUrl` to the tunnel's `wss://`
+of `127.0.0.1:listenPort` and set `publicWsUrl` to the tunnel's `wss://`
 address. See Recall's "Local Development Setup" guide.
 
 ## Status / scope

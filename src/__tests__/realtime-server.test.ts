@@ -31,9 +31,7 @@ function makeConfig(overrides: Partial<MeetingBotConfig> = {}): MeetingBotConfig
   return {
     region: "us-east-1",
     publicWsUrl: "ws://localhost:0",
-    listenHost: "127.0.0.1",
     listenPort: 0, // ephemeral port
-    events: ["transcript.data"],
     ...overrides,
   } as MeetingBotConfig;
 }

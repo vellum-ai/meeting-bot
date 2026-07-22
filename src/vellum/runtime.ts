@@ -3,29 +3,31 @@
  *
  * The runtime itself (meet session manager, bot spawning, bot-event ingress,
  * and the loopback control server the skill scripts call) runs in its own OS
- * process (`src/vellum/subprocess.ts`), mirroring how the Recall realtime
- * receiver is isolated: heavyweight work cannot block the daemon's event
- * loop, and the runtime gets its own crash boundary. This module spawns and
- * supervises that subprocess and adapts its relayed messages into
- * meeting-bot's pipeline:
+ * process (`src/vellum/worker.ts`, shown as `vellum-worker` in `assistant
+ * ps`), mirroring how the Recall realtime receiver is isolated: heavyweight
+ * work cannot block the daemon's event loop, and the runtime gets its own
+ * crash boundary. This module spawns and supervises that worker and adapts
+ * its relayed messages into meeting-bot's pipeline:
  *
  *   - `event` messages feed {@link handleVellumMeetEvent}: transcript chunks
  *     enter the session store and the same debounced transcript flush the
  *     Recall path uses; participant changes update the roster; terminal
  *     lifecycle states tear the session down.
- *   - `session` messages mirror subprocess-side joins/leaves into the
- *     in-memory session store and data/sessions.json (single writer: the
- *     daemon owns both).
- *   - `ready` publishes the control port to `data/vellum-control.json` for
- *     the join/leave skill scripts. The control endpoint is loopback-only
- *     and internal, so there is no token.
+ *   - `session` messages mirror worker-side joins/leaves into the in-memory
+ *     session store and data/sessions.json (single writer: the daemon owns
+ *     both).
+ *   - `ready` marks the worker up. The control server binds
+ *     `127.0.0.1:config.listenPort`, and the join/leave skill scripts read
+ *     that port from resolved-config.json, so there is no separately
+ *     published endpoint file to go stale. The control endpoint is
+ *     loopback-only and internal, so there is no token.
  *
  * "Vellum Runtime" rather than "meet runtime": Google Meet is the first
  * adapter; other video-call platforms will slot in behind the same runtime.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import type { InitContext } from "@vellumai/plugin-api";
@@ -47,8 +49,13 @@ import {
 } from "../session-store.ts";
 import { MeetBotEventSchema, type MeetBotEvent } from "./meet/contracts/index.ts";
 
-/** File under data/ the skill scripts read to reach the control endpoint. */
-export const VELLUM_CONTROL_FILE = "vellum-control.json";
+/**
+ * Legacy control-endpoint file under data/. Earlier versions published the
+ * worker's ephemeral control port here; the port is now fixed to
+ * `config.listenPort` and read from resolved-config.json, so any leftover
+ * file is deleted at startup to keep stale ports out of QA sessions.
+ */
+const LEGACY_CONTROL_FILE = "vellum-control.json";
 
 /**
  * Resolve the assistant workspace directory (moved here from the deleted
@@ -76,7 +83,7 @@ export function resolveWorkspaceDirFromContext(ctx: InitContext): string {
   return storageDir;
 }
 
-/** Time to wait for the subprocess to signal readiness. */
+/** Time to wait for the worker to signal readiness. */
 const READY_TIMEOUT_MS = 30_000;
 /** Time to wait for graceful shutdown before SIGTERM. */
 const STOP_GRACE_MS = 10_000;
@@ -94,14 +101,14 @@ interface RunningRuntime {
 
 let running: RunningRuntime | null = null;
 
-/** True when the Vellum Runtime subprocess is up. */
+/** True when the Vellum Runtime worker is up. */
 export function isVellumRuntimeRunning(): boolean {
   return running !== null && running.ready;
 }
 
 /**
  * Pipe one meet-bot event into meeting-bot's pipeline. Exported for direct
- * unit testing; production traffic arrives over the subprocess relay.
+ * unit testing; production traffic arrives over the worker relay.
  */
 export function handleVellumMeetEvent(
   meetingId: string,
@@ -160,8 +167,8 @@ export function handleVellumMeetEvent(
   }
 }
 
-/** Handle one JSON-lines message relayed from the subprocess. */
-function handleSubprocessMessage(
+/** Handle one JSON-lines message relayed from the worker. */
+function handleWorkerMessage(
   msg: Record<string, unknown>,
   state: RunningRuntime,
   onReady: () => void,
@@ -170,16 +177,9 @@ function handleSubprocessMessage(
     case "ready": {
       state.ready = true;
       state.controlPort = Number(msg.controlPort) || 0;
-      // Publish the control endpoint for the join/leave skill scripts.
-      mkdirSync(pluginDataDir(), { recursive: true });
-      writeFileSync(
-        join(pluginDataDir(), VELLUM_CONTROL_FILE),
-        JSON.stringify({ port: state.controlPort }, null, 2),
-        "utf-8",
-      );
       state.logger.info(
         { controlPort: state.controlPort, ingressPort: msg.ingressPort },
-        "meeting-bot: Vellum Runtime subprocess is ready",
+        "meeting-bot: Vellum Runtime worker is ready",
       );
       onReady();
       return;
@@ -233,7 +233,7 @@ function handleSubprocessMessage(
 }
 
 /**
- * Spawn the Vellum Runtime subprocess. Resolves once it signals readiness.
+ * Spawn the Vellum Runtime worker. Resolves once it signals readiness.
  * Idempotent: a second call while running is a no-op.
  */
 export function initVellumRuntime(
@@ -241,6 +241,12 @@ export function initVellumRuntime(
   config: MeetingBotConfig,
 ): Promise<void> {
   if (running) return Promise.resolve();
+
+  try {
+    rmSync(join(pluginDataDir(), LEGACY_CONTROL_FILE), { force: true });
+  } catch {
+    // best-effort cleanup of the legacy endpoint file
+  }
 
   return new Promise<void>((resolve, reject) => {
     const args = {
@@ -250,7 +256,7 @@ export function initVellumRuntime(
       runtimeMode: process.env.IS_CONTAINERIZED ? "docker" : "bare-metal",
     };
     const encoded = Buffer.from(JSON.stringify(args), "utf-8").toString("base64");
-    const scriptPath = new URL("./subprocess.ts", import.meta.url).pathname;
+    const scriptPath = new URL("./worker.ts", import.meta.url).pathname;
 
     const child = spawn(process.execPath, [scriptPath, encoded], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -271,7 +277,7 @@ export function initVellumRuntime(
       if (!state.ready) {
         ctx.logger.error(
           { timeoutMs: READY_TIMEOUT_MS },
-          "meeting-bot: Vellum Runtime subprocess did not signal readiness in time",
+          "meeting-bot: Vellum Runtime worker did not signal readiness in time",
         );
         try {
           child.kill("SIGKILL");
@@ -279,7 +285,7 @@ export function initVellumRuntime(
           // best-effort
         }
         running = null;
-        reject(new Error(`Vellum Runtime subprocess not ready within ${READY_TIMEOUT_MS}ms`));
+        reject(new Error(`Vellum Runtime worker not ready within ${READY_TIMEOUT_MS}ms`));
       }
     }, READY_TIMEOUT_MS);
     if (typeof readyTimer.unref === "function") readyTimer.unref();
@@ -299,7 +305,7 @@ export function initVellumRuntime(
           state.logger.warn({ line }, "meeting-bot: dropping unparseable vellum runtime line");
           continue;
         }
-        handleSubprocessMessage(msg, state, () => {
+        handleWorkerMessage(msg, state, () => {
           clearTimeout(readyTimer);
           resolve();
         });
@@ -316,9 +322,9 @@ export function initVellumRuntime(
       clearTimeout(readyTimer);
       if (!state.ready) {
         running = null;
-        reject(new Error(`Vellum Runtime subprocess exited before readiness (code=${code}, signal=${signal})`));
+        reject(new Error(`Vellum Runtime worker exited before readiness (code=${code}, signal=${signal})`));
       } else if (running === state) {
-        ctx.logger.info({ code, signal }, "meeting-bot: Vellum Runtime subprocess exited");
+        ctx.logger.info({ code, signal }, "meeting-bot: Vellum Runtime worker exited");
         running = null;
       }
     });
@@ -326,7 +332,7 @@ export function initVellumRuntime(
     child.on("error", (err) => {
       clearTimeout(readyTimer);
       running = null;
-      reject(new Error(`Vellum Runtime subprocess spawn error: ${String(err)}`));
+      reject(new Error(`Vellum Runtime worker spawn error: ${String(err)}`));
     });
   });
 }
@@ -343,7 +349,7 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
 }
 
 /**
- * Stop the Vellum Runtime subprocess: graceful "stop" on stdin (bots leave),
+ * Stop the Vellum Runtime worker: graceful "stop" on stdin (bots leave),
  * then SIGTERM/SIGKILL. Safe when not running.
  */
 export async function shutdownVellumRuntime(): Promise<void> {

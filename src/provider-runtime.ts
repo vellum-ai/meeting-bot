@@ -23,6 +23,7 @@ import type { InitContext } from "@vellumai/plugin-api";
 import {
   CREDENTIAL_FIELD,
   CREDENTIAL_SERVICE,
+  REALTIME_EVENTS,
   realtimeEndpointUrl,
   resolveApiKey,
   resolveConfig,
@@ -126,7 +127,7 @@ export async function startProviderRuntime(
         endpoint: config.publicWsUrl
           ? realtimeEndpointUrl(config)
           : "(tunnel not established)",
-        events: config.events,
+        events: REALTIME_EVENTS,
       },
       "meeting-bot: initialized — realtime receiver is listening for Recall connections",
     );

@@ -9,7 +9,7 @@
  * is a named export (`export async function POST(request)`) with the
  * standard Web API Request/Response signature. The assistant will
  * auto-register these handlers once its `routes/` discovery lands; the
- * plugin's interim ingress listener (`src/ingress-listener.ts`) serves
+ * plugin's interim in-process ingress (`src/vellum/ingress.ts`) serves
  * the same files with the same resolution semantics today. Like the
  * tools, the handler reads the live `SkillHost` at request time via
  * `getMeetHost()`.

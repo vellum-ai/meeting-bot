@@ -6,7 +6,7 @@
  * via `assistant credentials reveal`. No hardcoded keys, no env vars.
  *
  * Also reads the plugin's resolved config (written by the init hook) to
- * get the region, publicWsUrl, events, and transcript settings.
+ * get the region, publicWsUrl, and transcript settings.
  *
  * Usage from other scripts:
  *   import { getApiKey, getResolvedConfig, recallApiBase, createBot, leaveCall } from "./meeting-bot-client.ts";
@@ -82,9 +82,7 @@ export function sessionsFilePath(): string {
 export interface ResolvedConfig {
   region: string;
   publicWsUrl: string;
-  listenHost: string;
   listenPort: number;
-  events: string[];
   verificationToken: string;
   transcript: {
     provider: string;
@@ -146,13 +144,26 @@ function authHeaders(apiKey: string): Record<string, string> {
 const SILENT_MP3_B64 =
   "//uQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+// Realtime events the bot is always subscribed to. Not configurable: the
+// plugin supports the full set. Keep in sync with REALTIME_EVENTS in
+// src/config.ts (this script runs standalone and cannot import src/).
+const REALTIME_EVENTS = [
+  "transcript.data",
+  "transcript.partial_data",
+  "participant_events.join",
+  "participant_events.leave",
+  "participant_events.speech_on",
+  "participant_events.speech_off",
+  "participant_events.chat_message",
+] as const;
+
 function buildRecordingConfig(config: ResolvedConfig): Record<string, unknown> {
   const recording: Record<string, unknown> = {
     realtime_endpoints: [
       {
         type: "websocket",
         url: config.publicWsUrl.replace(/\/+$/, "") + "/",
-        events: config.events,
+        events: REALTIME_EVENTS,
       },
     ],
   };
@@ -280,41 +291,33 @@ export interface SessionEntry {
 // --- Vellum Runtime control --------------------------------------------------
 //
 // When config.provider is "vellum", joins and leaves are performed by the
-// Vellum Runtime subprocess (the bot spawn must be supervised there, not by
-// this short-lived script). The runtime publishes its loopback control port
-// in data/vellum-control.json; the endpoint is internal-only (127.0.0.1,
-// daemon-supervised), so requests carry no token.
+// Vellum Runtime worker (the bot spawn must be supervised there, not by
+// this short-lived script). The worker's control server binds
+// 127.0.0.1:listenPort, the same port field this script already reads from
+// resolved-config.json, so both sides always agree on the endpoint and no
+// separately published port file can go stale. The endpoint is
+// internal-only (loopback, daemon-supervised), so requests carry no token.
 
-interface VellumControl {
-  port: number;
-}
-
-/** Read the Vellum Runtime control endpoint published at plugin init. */
-export function readVellumControl(): VellumControl {
-  const path = join(findPluginDataDir(), "vellum-control.json");
-  if (!existsSync(path)) {
-    throw new Error(
-      "vellum control file not found. The plugin writes vellum-control.json when config.provider is \"vellum\": ensure the plugin is loaded with that provider and the daemon is running.",
-    );
-  }
-  const parsed = JSON.parse(readFileSync(path, "utf-8")) as VellumControl;
-  if (typeof parsed.port !== "number") {
-    throw new Error("vellum-control.json is malformed (expected { port })");
-  }
-  return parsed;
-}
-
-/** POST a control command to the Vellum Runtime. */
+/** POST a control command to the Vellum Runtime worker. */
 export async function vellumControlPost(
   path: "join" | "leave",
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const control = readVellumControl();
-  const res = await fetch(`http://127.0.0.1:${control.port}/${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const port = getResolvedConfig().listenPort;
+  let res: Response;
+  try {
+    res = await fetch(`http://127.0.0.1:${port}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(
+      `could not reach the Vellum Runtime at 127.0.0.1:${port} (connection refused). ` +
+        'The plugin may not be loaded with provider "vellum", or the runtime failed to start. ' +
+        "Reload it with: bun skills/meeting-bot/scripts/reload.ts",
+    );
+  }
   const text = await res.text();
   let parsed: Record<string, unknown> = {};
   try {

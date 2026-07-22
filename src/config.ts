@@ -24,7 +24,7 @@
  * storing the key.
  *
  * Everything else has a working default. The realtime server binds locally on
- * `listenHost:listenPort`; a reverse proxy / tunnel maps `publicWsUrl` onto it.
+ * `127.0.0.1:listenPort`; a reverse proxy / tunnel maps `publicWsUrl` onto it.
  */
 
 import { z } from "zod";
@@ -46,11 +46,13 @@ export const RECALL_REGIONS = [
 export type RecallRegion = (typeof RECALL_REGIONS)[number];
 
 /**
- * Realtime event kinds the plugin can subscribe the bot to. Recall pushes
- * these over the WebSocket connection it opens to `publicWsUrl`. The default
- * set is transcript-only — the smallest useful stream for a note-taker. Audio
- * and video buffer events exist too (`audio_mixed_raw.data`, etc.) but are
- * heavier and off by default.
+ * Realtime event kinds the plugin subscribes the bot to. Recall pushes these
+ * over the WebSocket connection it opens to `publicWsUrl`. Not configurable:
+ * the plugin always subscribes to the full set it supports. Audio and video
+ * buffer events exist too (`audio_mixed_raw.data`, etc.) but are heavier and
+ * not part of the supported set. Keep in sync with the copy in
+ * `skills/meeting-bot/scripts/meeting-bot-client.ts` (the standalone skill
+ * client cannot import src/).
  */
 export const REALTIME_EVENTS = [
   "transcript.data",
@@ -89,10 +91,6 @@ export const MeetingBotConfigSchema = z
       .describe(
         "Stable public base URL (ws:// or wss://) Recall dials back into for realtime events. Maps to the plugin's realtime server via a tunnel or ingress. Example: wss://your-app.ngrok.app. When omitted, the plugin auto-provisions a Cloudflare Tunnel at init time (see src/inbound.ts).",
       ),
-    listenHost: z
-      .string()
-      .default("127.0.0.1")
-      .describe("Host the plugin's realtime WebSocket server binds to."),
     listenPort: z
       .number()
       .int()
@@ -100,7 +98,7 @@ export const MeetingBotConfigSchema = z
       .max(65535)
       .default(8790)
       .describe(
-        "Port the plugin's realtime WebSocket server listens on. 0 selects an ephemeral port.",
+        "Local loopback port the active provider runtime listens on: the realtime WebSocket server (recall) or the Vellum Runtime control server (vellum). Always bound on 127.0.0.1. 0 selects an ephemeral port (recall only).",
       ),
     verificationToken: z
       .string()
@@ -108,14 +106,6 @@ export const MeetingBotConfigSchema = z
       .describe(
         "Shared secret appended to the realtime endpoint URL as ?token=… and checked on each inbound connection. When empty, connection-token verification is skipped (not recommended outside local dev).",
       ),
-    events: z
-      .array(z.enum(REALTIME_EVENTS))
-      .default([
-        "transcript.data",
-        "participant_events.join",
-        "participant_events.leave",
-      ])
-      .describe("Realtime events the bot is subscribed to."),
     transcript: z
       .object({
         provider: z
@@ -202,6 +192,11 @@ export function resolveConfig(raw: unknown): ConfigResolution {
   if (!config.publicWsUrl) {
     warnings.push(
       "publicWsUrl is not set — the plugin will auto-provision a Cloudflare Tunnel at init time. This is insecure and intended for development only. Set publicWsUrl explicitly for production deployments.",
+    );
+  }
+  if (config.provider === "vellum" && config.listenPort === 0) {
+    warnings.push(
+      "listenPort is 0 with provider \"vellum\": the skill scripts read this port from resolved-config.json to reach the control server, so it must be a fixed port.",
     );
   }
 

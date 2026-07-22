@@ -16,6 +16,7 @@
  */
 
 import {
+  REALTIME_EVENTS,
   realtimeEndpointUrl,
   recallApiBase,
   resolveApiKey,
@@ -63,7 +64,7 @@ function buildRecordingConfig(config: MeetingBotConfig): Record<string, unknown>
       {
         type: "websocket",
         url: realtimeEndpointUrl(config),
-        events: config.events,
+        events: REALTIME_EVENTS,
       },
     ],
   };

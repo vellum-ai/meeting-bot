@@ -11,7 +11,7 @@ import { clearTranscriptBuffer } from "../realtime-server.ts";
 import { closeSession, getSession, openSession } from "../session-store.ts";
 import type { MeetBotEvent } from "../vellum/meet/contracts/index.ts";
 import { handleVellumMeetEvent } from "../vellum/runtime.ts";
-import { MEET_URL_REGEX } from "../vellum/subprocess.ts";
+import { MEET_URL_REGEX } from "../vellum/worker.ts";
 
 const noopLogger = {
   info: () => {},
