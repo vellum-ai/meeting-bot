@@ -100,10 +100,11 @@ host into `dist/`). It calls the plugin's routes, served under
 | `PATCH /x/plugins/meeting-bot/settings`  | Update the editable fields; returns the view. |
 | `POST /x/plugins/meeting-bot/provider`   | Switch the meeting provider (side-effectful). |
 
-The app shows the whole config. Two fields are editable via the settings
-PATCH; the provider is switched through its own dedicated route
-(`POST /x/plugins/meeting-bot/provider`) because a provider change carries
-side effects beyond a config write. The rest is shown read-only.
+The app shows the whole config. Fields save on change (there is no Save
+button): `useVoiceMode` and `region` PATCH the settings route as they are
+edited, and the provider is switched through its own dedicated route
+(`POST /x/plugins/meeting-bot/provider`), which tears down the old provider
+runtime and starts the new one immediately. The rest is shown read-only.
 
 | Editable field | Type                       | Default     | Via              |
 | -------------- | -------------------------- | ----------- | ---------------- |
@@ -117,7 +118,8 @@ Settings persist to the plugin's `config.json` (the same host-owned config the
 never sent to the browser. Meeting history is read from `data/sessions.json`.
 `region` selects the Recall region; `useVoiceMode` selects the voice-response
 API (see Behavior flags below) and `provider` selects the meeting provider
-(applied via its own route; picked up on the next plugin reload).
+(applied live via its own route: the old runtime is torn down and the new one
+started immediately; posting the active provider bounces its runtime).
 
 ## Configuration
 

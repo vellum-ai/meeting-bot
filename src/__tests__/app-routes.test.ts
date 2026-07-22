@@ -108,3 +108,13 @@ describe("handleProviderPost validation", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("restartProviderRuntime", () => {
+  test("degrades to a note when the plugin has not initialized", async () => {
+    // In tests there is no stashed InitContext, so the restart must not touch
+    // any runtime and must say so.
+    const { restartProviderRuntime } = await import("../provider-runtime.ts");
+    const note = await restartProviderRuntime();
+    expect(note).toContain("not initialized");
+  });
+});

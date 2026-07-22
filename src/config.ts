@@ -154,7 +154,7 @@ export const MeetingBotConfigSchema = z
       .enum(MEETING_PROVIDERS)
       .default("recall")
       .describe(
-        "Which meeting provider the bot uses: 'recall' (Recall.ai, the default) or 'vellum' (the Vellum Runtime). Changed via the dedicated provider route, not the settings PATCH; picked up on the next plugin reload.",
+        "Which meeting provider the bot uses: 'recall' (Recall.ai, the default) or 'vellum' (the Vellum Runtime). Changed via the dedicated provider route, not the settings PATCH; the switch tears down the old runtime and starts the new one immediately.",
       ),
   })
   .describe(

@@ -38,8 +38,8 @@
 
 import type { Server, ServerWebSocket } from "bun";
 
-import type { MeetingBotConfig } from "./config.ts";
-import { RealtimeMessageSchema } from "./realtime-events.ts";
+import type { MeetingBotConfig } from "../config.ts";
+import { RealtimeMessageSchema } from "../realtime-events.ts";
 
 interface SocketData {
   remote: string;

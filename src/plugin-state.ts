@@ -7,6 +7,8 @@
  * ask "is the plugin initialized yet?".
  */
 
+import type { InitContext } from "@vellumai/plugin-api";
+
 import type { MeetingBotConfig } from "./config.ts";
 
 let resolvedConfig: MeetingBotConfig | null = null;
@@ -47,4 +49,20 @@ export function requireConfig(): MeetingBotConfig {
 
 export function hasConfig(): boolean {
   return resolvedConfig !== null;
+}
+
+/**
+ * The InitContext the daemon handed the init hook, stashed so the provider
+ * route can tear down and spin up provider runtimes live (it needs the
+ * logger and the plugin storage dir, and the Vellum Runtime supervisor
+ * takes the whole context).
+ */
+let initContext: InitContext | null = null;
+
+export function setInitContext(ctx: InitContext): void {
+  initContext = ctx;
+}
+
+export function getInitContext(): InitContext | null {
+  return initContext;
 }
