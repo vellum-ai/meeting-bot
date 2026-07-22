@@ -150,9 +150,11 @@ export async function ensureBrowserStack(log: Logger): Promise<BrowserStackStatu
     return { ok: true, missing: [] };
   }
 
-  const detail = installError
-    ? `apt-get install failed: ${installError.slice(0, 300)}`
-    : "apt-get reported success but required binaries are still missing";
+  const detail =
+    (installError
+      ? `apt-get install failed: ${installError.slice(0, 300)}`
+      : "apt-get reported success but required binaries are still missing") +
+    `. PATH searched: ${process.env.PATH ?? "(unset)"}`;
   log.error(
     "meeting-bot: browser stack unavailable, the bot cannot join meetings in direct mode",
     { missing: stillMissing, detail },
