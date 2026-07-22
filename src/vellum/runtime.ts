@@ -21,6 +21,10 @@
  *     that port from resolved-config.json, so there is no separately
  *     published endpoint file to go stale. The control endpoint is
  *     loopback-only and internal, so there is no token.
+ *   - `stt.*` messages feed the transcription relay: the daemon opens
+ *     streaming STT sessions via the in-process plugin-api
+ *     (`openTranscriptionSession`) on the worker's behalf and pipes
+ *     transcript events back over the worker's stdin (see stt-bridge.ts).
  *
  * "Vellum Runtime" rather than "meet runtime": Google Meet is the first
  * adapter; other video-call platforms will slot in behind the same runtime.
@@ -48,6 +52,8 @@ import {
   removePersistedSession,
 } from "../session-store.ts";
 import { MeetBotEventSchema, type MeetBotEvent } from "./meet/contracts/index.ts";
+import { openTranscriptionSession } from "./stt-api.ts";
+import { createDaemonSttBridge, type DaemonSttBridge } from "./stt-bridge.ts";
 
 /**
  * Legacy control-endpoint file under data/. Earlier versions published the
@@ -97,6 +103,8 @@ interface RunningRuntime {
   stdoutBuffer: string;
   ready: boolean;
   controlPort: number;
+  /** Daemon-side owner of streaming transcription sessions for the worker. */
+  sttBridge: DaemonSttBridge;
 }
 
 let running: RunningRuntime | null = null;
@@ -173,6 +181,9 @@ function handleWorkerMessage(
   state: RunningRuntime,
   onReady: () => void,
 ): void {
+  // stt.* messages belong to the transcription relay.
+  if (state.sttBridge.handleMessage(msg)) return;
+
   switch (msg.type) {
     case "ready": {
       state.ready = true;
@@ -270,6 +281,17 @@ export function initVellumRuntime(
       stdoutBuffer: "",
       ready: false,
       controlPort: 0,
+      sttBridge: createDaemonSttBridge({
+        openSession: openTranscriptionSession,
+        writeToWorker: (msg) => {
+          try {
+            child.stdin?.write(`${JSON.stringify(msg)}\n`);
+          } catch {
+            // stdin already closed; the worker is going away
+          }
+        },
+        logger: ctx.logger,
+      }),
     };
     running = state;
 
@@ -320,6 +342,7 @@ export function initVellumRuntime(
 
     child.on("exit", (code, signal) => {
       clearTimeout(readyTimer);
+      state.sttBridge.stopAll();
       if (!state.ready) {
         running = null;
         reject(new Error(`Vellum Runtime worker exited before readiness (code=${code}, signal=${signal})`));
@@ -354,9 +377,10 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
  */
 export async function shutdownVellumRuntime(): Promise<void> {
   if (!running) return;
-  const { child, logger } = running;
+  const { child, logger, sttBridge } = running;
   running = null;
 
+  sttBridge.stopAll();
   try {
     child.stdin?.write("stop\n");
     child.stdin?.end();

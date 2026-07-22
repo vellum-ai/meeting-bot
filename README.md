@@ -74,7 +74,15 @@ the same session store and debounced transcript flush the Recall path uses,
 so everything downstream (meeting history, conversation turns) is
 provider-agnostic. The join/leave skill scripts detect the provider and the
 control port from the resolved config and command the runtime over that
-loopback endpoint (internal-only, so no token). See
+loopback endpoint (internal-only, so no token).
+
+Meeting audio is transcribed through the assistant's configured STT provider
+(`services.stt.provider`): the daemon opens streaming sessions via the
+plugin-api `openTranscriptionSession` and relays audio and transcript events
+over the worker's stdio channel (`src/vellum/stt-bridge.ts` /
+`src/vellum/stt-relay.ts`). This needs a host with `@vellumai/plugin-api`
+0.10.12 or newer; on older hosts joins fail with a descriptive
+STT-unavailable error. See
 [`src/vellum/meet/AGENTS.md`](src/vellum/meet/AGENTS.md) for the vendored
 tree's layout, the bot image build, and which meet-join sub-modules are
 disabled.
