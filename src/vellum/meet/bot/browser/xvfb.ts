@@ -10,9 +10,10 @@
  * These helpers are intentionally small:
  *
  *   - `startXvfb(display)` spawns `Xvfb :99 -screen 0 1280x720x24` and waits
- *     for the corresponding X lock file (`/tmp/.X<N>-lock`) to appear before
- *     resolving. If the lock file is already present we assume Xvfb is up and
- *     return a no-op handle without spawning a second server.
+ *     until the display's Unix socket accepts a connection before resolving.
+ *     A server already accepting on the display is reused via a no-op
+ *     handle; a lingering lock file without a connectable server is treated
+ *     as stale and cleared.
  *   - `stopXvfb(handle)` sends SIGTERM, then escalates to SIGKILL after 2s.
  *
  * Everything heavier (integration against real Xvfb + Chromium) is gated
@@ -21,7 +22,8 @@
  */
 
 import type { Subprocess } from "bun";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
+import { createConnection } from "node:net";
 
 /** Opaque handle returned by `startXvfb`, consumed by `stopXvfb`. */
 export interface XvfbHandle {
@@ -61,27 +63,34 @@ function lockFilePath(displayIndex: number): string {
   return `/tmp/.X${displayIndex}-lock`;
 }
 
-function parseLockPid(lockPath: string): number | null {
-  try {
-    const content = readFileSync(lockPath, "utf8").trim();
-    const pid = Number.parseInt(content, 10);
-    return Number.isFinite(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
+/** Path of the X server's Unix listening socket for a display. */
+function socketFilePath(displayIndex: number): string {
+  return `/tmp/.X11-unix/X${displayIndex}`;
 }
 
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // EPERM means the process exists but is owned by another user — still
-    // alive from our perspective, and we must not clobber its lock file.
-    // Only ESRCH ("no such process") is a reliable liveness signal.
-    if ((err as NodeJS.ErrnoException)?.code === "EPERM") return true;
-    return false;
-  }
+/**
+ * True when an X server is actually accepting connections on the display's
+ * Unix socket. This is the readiness signal that matters: a lock file can
+ * outlive its server (SIGKILL leaves it behind, and the recorded pid can be
+ * recycled by an unrelated process), and Chrome only cares whether the
+ * socket connects.
+ */
+function canConnectToDisplay(
+  displayIndex: number,
+  timeoutMs = 500,
+): Promise<boolean> {
+  const path = socketFilePath(displayIndex);
+  if (!existsSync(path)) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const socket = createConnection(path);
+    const done = (ok: boolean): void => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -89,24 +98,32 @@ async function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Start Xvfb on `display` (default `":99"`) and wait for its lock file to
- * appear. If the lock file already exists we assume another process owns
- * Xvfb on this display and return a handle with `process: null` — `stopXvfb`
- * will then be a no-op.
+ * Start Xvfb on `display` (default `":99"`) and wait for its Unix socket to
+ * accept a connection. If a server is already accepting on this display
+ * (e.g. an Xvfb left over from a previous bot), it is reused and a handle
+ * with `process: null` is returned; `stopXvfb` will then be a no-op.
+ *
+ * The lock file alone is never trusted as evidence of a running server: a
+ * SIGKILLed Xvfb leaves its lock behind, the pid recorded in it can be
+ * recycled by an unrelated live process, and Chrome would then launch
+ * against a display nothing is serving ("Missing X server or $DISPLAY").
+ * Readiness is a successful connect on `/tmp/.X11-unix/X<N>`, both for
+ * reuse and after spawning.
  */
 export async function startXvfb(display = ":99"): Promise<XvfbHandle> {
   const displayIndex = parseDisplayIndex(display);
   const lockPath = lockFilePath(displayIndex);
   const canonicalDisplay = `:${displayIndex}`;
 
+  if (await canConnectToDisplay(displayIndex)) {
+    return { display: canonicalDisplay, process: null };
+  }
+
   if (existsSync(lockPath)) {
-    // Verify the lock holder is still alive. If Xvfb died uncleanly its
-    // lock file lingers and prevents respawning.
-    const pid = parseLockPid(lockPath);
-    if (pid !== null && isProcessAlive(pid)) {
-      return { display: canonicalDisplay, process: null };
-    }
-    // Stale lock — remove it so we can respawn.
+    // A lock without a connectable server is stale regardless of whether
+    // its recorded pid happens to be alive (pid recycling makes the pid
+    // meaningless). Xvfb refuses to start while the lock exists, so clear
+    // it; the socket file may linger too, and Xvfb replaces it on bind.
     try {
       unlinkSync(lockPath);
     } catch {
@@ -125,7 +142,7 @@ export async function startXvfb(display = ":99"): Promise<XvfbHandle> {
 
   const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (existsSync(lockPath)) {
+    if (await canConnectToDisplay(displayIndex)) {
       return { display: canonicalDisplay, process: proc };
     }
     // If Xvfb died during startup, bail out with a useful error instead of
@@ -146,7 +163,7 @@ export async function startXvfb(display = ":99"): Promise<XvfbHandle> {
     // Best effort; the process may have already exited.
   }
   throw new Error(
-    `startXvfb: lock file ${lockPath} did not appear within ${LOCK_WAIT_TIMEOUT_MS}ms`,
+    `startXvfb: display ${canonicalDisplay} did not accept connections within ${LOCK_WAIT_TIMEOUT_MS}ms`,
   );
 }
 
