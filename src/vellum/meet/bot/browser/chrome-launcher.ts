@@ -41,8 +41,12 @@ export interface LaunchChromeOptions {
   /** Absolute path to the Chrome user-data directory for this session. */
   userDataDir: string;
   /**
-   * Browser binary path. Defaults to `/usr/bin/chromium` (Debian's chromium
-   * package, installed by the bot container). Override in tests.
+   * Browser binary path. Defaults to {@link defaultChromeBinary}: the
+   * `CHROME_BINARY` env override when set, else the first chromium/chrome
+   * binary found on PATH. PATH resolution matters outside the container:
+   * the assistant image installs chromium under a relocated apt root
+   * (`/data/system/bin`), so a hardcoded `/usr/bin/chromium` does not
+   * exist there. Override in tests.
    */
   chromeBinary?: string;
   /**
@@ -173,10 +177,40 @@ function buildChromeArgs(opts: {
  * The caller owns lifecycle: they must invoke `stop()` when done, or await
  * `exitPromise` if Chrome exits on its own (expected when the meeting ends).
  */
+/**
+ * Names probed on PATH for the browser binary, most specific first.
+ * `chromium` is Debian's package name (the bot container); the rest cover
+ * other hosts running the bot directly.
+ */
+const CHROME_BINARY_CANDIDATES = [
+  "chromium",
+  "chromium-browser",
+  "google-chrome-stable",
+  "google-chrome",
+] as const;
+
+/**
+ * Resolve the browser binary: `CHROME_BINARY` env override first, then the
+ * PATH (which the direct runner augments with the relocated apt root's bin
+ * dir), then the container's `/usr/bin/chromium` as the last resort so the
+ * Docker image needs no PATH assumptions.
+ */
+export function defaultChromeBinary(): string {
+  const fromEnv = process.env.CHROME_BINARY?.trim();
+  if (fromEnv) return fromEnv;
+  for (const name of CHROME_BINARY_CANDIDATES) {
+    // PATH is passed explicitly: Bun.which snapshots the process env at
+    // startup, so it would miss in-process PATH augmentation otherwise.
+    const found = Bun.which(name, { PATH: process.env.PATH ?? "" });
+    if (found) return found;
+  }
+  return "/usr/bin/chromium";
+}
+
 export async function launchChrome(
   opts: LaunchChromeOptions,
 ): Promise<ChromeProcessHandle> {
-  const chromeBinary = opts.chromeBinary ?? "/usr/bin/chromium";
+  const chromeBinary = opts.chromeBinary ?? defaultChromeBinary();
   const logger = opts.logger ?? NOOP_LOGGER;
   const spawnFn = opts.spawn ?? nodeSpawn;
   const sigkillGraceMs = opts.sigkillGraceMs ?? DEFAULT_SIGKILL_GRACE_MS;

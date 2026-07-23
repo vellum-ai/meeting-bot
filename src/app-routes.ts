@@ -20,6 +20,7 @@ import {
   ProviderChangeSchema,
   readConfigView,
 } from "./app-settings.ts";
+import { JoinRequestError, startJoinFromApp } from "./join-flow.ts";
 import { readMeetingHistory } from "./meeting-history.ts";
 import { restartProviderRuntime } from "./provider-runtime.ts";
 import { pluginConfigPath, pluginDataDir } from "./plugin-paths.ts";
@@ -128,6 +129,51 @@ export async function handleSettingsPatch(request: Request): Promise<Response> {
   }
 
   return json(applyConfigUpdate(pluginConfigPath(), parsed.data));
+}
+
+/**
+ * `POST /x/plugins/meeting-bot/join`: start a join for a pasted meeting
+ * link (the dashboard's Join button). Validates the URL shape here and
+ * delegates to `startJoinFromApp`, which runs the same provider-specific
+ * join logic the skill script uses. Returns as soon as the join has been
+ * started; the meeting's progress shows up in the history rows.
+ */
+export async function handleJoinPost(request: Request): Promise<Response> {
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return json({ error: "request body must be valid JSON" }, 400);
+  }
+
+  const meetingUrl =
+    typeof (raw as { meetingUrl?: unknown } | null)?.meetingUrl === "string"
+      ? ((raw as { meetingUrl: string }).meetingUrl ?? "").trim()
+      : "";
+  let parsedUrl: URL | null = null;
+  try {
+    parsedUrl = new URL(meetingUrl);
+  } catch {
+    // handled below
+  }
+  if (
+    parsedUrl === null ||
+    (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:")
+  ) {
+    return json({ error: "meetingUrl must be an http(s) meeting link" }, 400);
+  }
+
+  try {
+    return json(await startJoinFromApp(meetingUrl));
+  } catch (err) {
+    if (err instanceof JoinRequestError) {
+      return json({ error: err.message }, err.status);
+    }
+    return json(
+      { error: `failed to start the join: ${String(err).slice(0, 300)}` },
+      500,
+    );
+  }
 }
 
 /**

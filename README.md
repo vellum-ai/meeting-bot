@@ -120,6 +120,7 @@ host into `dist/`). It calls the plugin's routes, served under
 | `GET /x/plugins/meeting-bot/settings`    | The resolved config for display, as JSON.     |
 | `PATCH /x/plugins/meeting-bot/settings`  | Update the editable fields; returns the view. |
 | `POST /x/plugins/meeting-bot/provider`   | Switch the meeting provider (side-effectful). |
+| `POST /x/plugins/meeting-bot/join`       | Start a join for a pasted meeting link.       |
 
 The app shows the whole config. Fields save on change (there is no Save
 button): `useVoiceMode` and `region` PATCH the settings route as they are

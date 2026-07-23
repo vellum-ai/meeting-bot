@@ -52,6 +52,14 @@ export function hasConfig(): boolean {
 }
 
 /**
+ * Test-only: clear the stashed config so not-yet-initialized gating paths
+ * can be exercised regardless of what earlier test files stashed.
+ */
+export function clearResolvedConfigForTests(): void {
+  resolvedConfig = null;
+}
+
+/**
  * The InitContext the daemon handed the init hook, stashed so the provider
  * route can tear down and spin up provider runtimes live (it needs the
  * logger and the plugin storage dir, and the Vellum Runtime supervisor
