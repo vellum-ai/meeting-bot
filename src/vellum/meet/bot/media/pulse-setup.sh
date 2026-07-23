@@ -39,13 +39,27 @@ set -euo pipefail
 # compile-time module path refers to the non-relocated /usr tree, so
 # without --dl-search-path every load-module below would fail.
 #
+# `-n --load=module-native-protocol-unix` replaces default.pa: the daemon
+# only loads startup modules from its default script, and it resolves that
+# script at the compile-time sysconfdir (/etc/pulse/default.pa), which does
+# not exist under a relocated apt root. Without it the daemon aborts with
+# "Daemon startup without any loaded modules, refusing to work". The bot
+# does not want default.pa anyway: the only startup module it needs is the
+# native protocol socket for the pactl calls below, and skipping the rest
+# (udev detection, suspend-on-idle, restore modules) keeps the headless
+# topology deterministic in the Docker image too. Everything else is loaded
+# explicitly below.
+#
 # Running as root: per-user pulseaudio logs "This program is not intended
-# to be run as root" as a warning but proceeds; the fatal error observed
-# alongside it was the self-exec canonicalization above. If a future
-# pulseaudio build makes root fatal, the sanctioned path is a --system
-# instance (different socket + auth model), not suppressing the warning.
+# to be run as root" as a warning but proceeds, and it warns "Couldn't
+# canonicalize binary path, cannot self execute" when its compile-time
+# binary path does not exist under a relocated root; both are non-fatal
+# with --daemonize=no. If a future pulseaudio build makes root fatal, the
+# sanctioned path is a --system instance (different socket + auth model),
+# not suppressing the warning.
 if ! pactl info >/dev/null 2>&1; then
-  set -- --daemonize=no --exit-idle-time=-1 --log-target=stderr
+  set -- --daemonize=no --exit-idle-time=-1 --log-target=stderr \
+    -n --load=module-native-protocol-unix
   if [ -n "${PULSE_DL_SEARCH_PATH:-}" ]; then
     set -- "$@" --dl-search-path="${PULSE_DL_SEARCH_PATH}"
   fi
