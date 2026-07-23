@@ -12,12 +12,14 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  handleJoinPost,
   handleMeetingLogGet,
   handleMeetingsGet,
   handleProviderPost,
   handleSettingsGet,
   handleSettingsPatch,
 } from "../app-routes.ts";
+import { clearResolvedConfigForTests } from "../plugin-state.ts";
 
 function patch(body: string): Request {
   return new Request("http://x/x/plugins/meeting-bot/settings", {
@@ -26,6 +28,45 @@ function patch(body: string): Request {
     body,
   });
 }
+
+function joinRequest(body: string): Request {
+  return new Request("http://x/x/plugins/meeting-bot/join", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+}
+
+describe("handleJoinPost validation", () => {
+  test("rejects a non-JSON body with 400", async () => {
+    const res = await handleJoinPost(joinRequest("not json"));
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects a missing meetingUrl with 400", async () => {
+    const res = await handleJoinPost(joinRequest(JSON.stringify({})));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("meetingUrl");
+  });
+
+  test("rejects a non-http(s) link with 400", async () => {
+    const res = await handleJoinPost(
+      joinRequest(JSON.stringify({ meetingUrl: "file:///etc/passwd" })),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("returns 503 when the plugin has not initialized", async () => {
+    clearResolvedConfigForTests();
+    const res = await handleJoinPost(
+      joinRequest(
+        JSON.stringify({ meetingUrl: "https://meet.google.com/abc-defg-hij" }),
+      ),
+    );
+    expect(res.status).toBe(503);
+  });
+});
 
 describe("handleMeetingsGet", () => {
   test("returns a JSON array", async () => {

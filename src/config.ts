@@ -50,21 +50,11 @@ export type RecallRegion = (typeof RECALL_REGIONS)[number];
  * over the WebSocket connection it opens to `publicWsUrl`. Not configurable:
  * the plugin always subscribes to the full set it supports. Audio and video
  * buffer events exist too (`audio_mixed_raw.data`, etc.) but are heavier and
- * not part of the supported set. Keep in sync with the copy in
- * `skills/meeting-bot/scripts/meeting-bot-client.ts` (the standalone skill
- * client cannot import src/).
+ * not part of the supported set. The canonical list lives in
+ * `src/recall-requests.ts` (dependency-free so the skill client imports it
+ * too); re-exported here for the daemon-side consumers.
  */
-export const REALTIME_EVENTS = [
-  "transcript.data",
-  "transcript.partial_data",
-  "participant_events.join",
-  "participant_events.leave",
-  "participant_events.speech_on",
-  "participant_events.speech_off",
-  "participant_events.chat_message",
-] as const;
-
-export type RealtimeEvent = (typeof REALTIME_EVENTS)[number];
+export { REALTIME_EVENTS, type RealtimeEvent } from "./recall-requests.ts";
 
 /**
  * Meeting-bot provider options. Chooses which backend the bot uses:

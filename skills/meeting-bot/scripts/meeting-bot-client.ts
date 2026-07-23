@@ -16,6 +16,11 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import {
+  buildCreateBotBody,
+  recallAuthHeaders,
+} from "../../../src/recall-requests.ts";
+
 /** Credential service/field for the Recall API key. */
 const CREDENTIAL_SERVICE = "meeting-bot";
 const CREDENTIAL_FIELD = "api_key";
@@ -132,55 +137,10 @@ export class RecallApiError extends Error {
   }
 }
 
-function authHeaders(apiKey: string): Record<string, string> {
-  return {
-    Authorization: apiKey,
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  };
-}
-
-// Minimal silent MP3 frame to unlock the output_audio endpoint.
-const SILENT_MP3_B64 =
-  "//uQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
-// Realtime events the bot is always subscribed to. Not configurable: the
-// plugin supports the full set. Keep in sync with REALTIME_EVENTS in
-// src/config.ts (this script runs standalone and cannot import src/).
-const REALTIME_EVENTS = [
-  "transcript.data",
-  "transcript.partial_data",
-  "participant_events.join",
-  "participant_events.leave",
-  "participant_events.speech_on",
-  "participant_events.speech_off",
-  "participant_events.chat_message",
-] as const;
-
-function buildRecordingConfig(config: ResolvedConfig): Record<string, unknown> {
-  const recording: Record<string, unknown> = {
-    realtime_endpoints: [
-      {
-        type: "websocket",
-        url: config.publicWsUrl.replace(/\/+$/, "") + "/",
-        events: REALTIME_EVENTS,
-      },
-    ],
-  };
-
-  if (config.transcript?.provider === "recallai_streaming") {
-    recording.transcript = {
-      provider: {
-        recallai_streaming: {
-          mode: config.transcript.mode,
-          language_code: config.transcript.languageCode,
-        },
-      },
-    };
-  }
-
-  return recording;
-}
+// Request building (recording config, silent MP3, auth headers) is shared
+// with the daemon-side join flow via src/recall-requests.ts, which is
+// dependency-free on purpose so this standalone script can import it.
+const authHeaders = recallAuthHeaders;
 
 /**
  * Create a bot and send it to the meeting URL.
@@ -192,19 +152,12 @@ export async function createBot(
   opts: { botName?: string } = {},
 ): Promise<RecallBot> {
   const apiKey = getApiKey();
-  const body: Record<string, unknown> = {
-    meeting_url: meetingUrl,
-    recording_config: buildRecordingConfig(config),
-    automatic_audio_output: {
-      in_call_recording: {
-        data: {
-          kind: "mp3",
-          b64_data: SILENT_MP3_B64,
-        },
-      },
-    },
-  };
-  if (opts.botName) body.bot_name = opts.botName;
+  const body = buildCreateBotBody({
+    meetingUrl,
+    endpointUrl: config.publicWsUrl.replace(/\/+$/, "") + "/",
+    ...(config.transcript ? { transcript: config.transcript } : {}),
+    ...(opts.botName ? { botName: opts.botName } : {}),
+  });
 
   const res = await fetch(`${recallApiBase(config.region)}bot/`, {
     method: "POST",

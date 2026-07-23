@@ -39,6 +39,19 @@ const STYLES = `
   .app { max-width: 820px; margin: 0 auto; padding: 24px 20px 64px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 32px 0 12px; }
+  .h2row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin: 32px 0 12px; flex-wrap: wrap;
+  }
+  .h2row h2 { margin: 0; }
+  .joinform { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .joinform input {
+    font: inherit; padding: 6px 8px; border-radius: 6px; min-width: 280px;
+    border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+    background: transparent; color: inherit;
+  }
+  .joinnote { font-size: 12px; opacity: 0.8; }
+  .joinnote.error { color: color-mix(in srgb, red 70%, CanvasText); opacity: 1; }
   .sub { opacity: 0.7; margin: 0 0 8px; }
   .card {
     border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
@@ -402,14 +415,93 @@ function Configuration({
   );
 }
 
+function JoinForm({ onJoined }: { onJoined: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ kind: "ok" | "error"; text: string } | null>(
+    null,
+  );
+
+  const submit = async () => {
+    const meetingUrl = url.trim();
+    if (!meetingUrl || busy) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await vfetch(`${BASE}/join`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ meetingUrl }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        note?: string;
+        error?: string;
+      };
+      if (res.ok) {
+        setNote({ kind: "ok", text: body.note ?? "Join started." });
+        setUrl("");
+        onJoined();
+      } else {
+        setNote({ kind: "error", text: body.error ?? `Join failed (${res.status}).` });
+      }
+    } catch {
+      setNote({ kind: "error", text: "Join request failed; is the daemon running?" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}>Join</button>
+    );
+  }
+
+  return (
+    <div className="joinform">
+      <input
+        type="text"
+        placeholder="Paste a meeting link (https://meet.google.com/...)"
+        value={url}
+        onInput={(e) => setUrl((e.target as HTMLInputElement).value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void submit();
+        }}
+        autoFocus
+      />
+      <button disabled={busy || url.trim() === ""} onClick={() => void submit()}>
+        {busy ? "Joining..." : "Join"}
+      </button>
+      <button
+        disabled={busy}
+        onClick={() => {
+          setOpen(false);
+          setUrl("");
+          setNote(null);
+        }}
+      >
+        Cancel
+      </button>
+      {note ? (
+        <span className={note.kind === "error" ? "joinnote error" : "joinnote"}>
+          {note.text}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function MeetingHistory({
   provider,
   meetings,
   onSelect,
+  onRefresh,
 }: {
   provider: Provider | null;
   meetings: Meeting[] | null;
   onSelect: (m: Meeting) => void;
+  onRefresh: () => void;
 }) {
   const [page, setPage] = useState(0);
 
@@ -424,7 +516,10 @@ function MeetingHistory({
 
   return (
     <section>
-      <h2>Meeting history</h2>
+      <div className="h2row">
+        <h2>Meeting history</h2>
+        <JoinForm onJoined={onRefresh} />
+      </div>
       <div className="card">
         <table>
           <thead>
@@ -557,6 +652,17 @@ function App() {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [selected, setSelected] = useState<Meeting | null>(null);
 
+  const refreshMeetings = () => {
+    vfetch(`${BASE}/meetings`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((m: Meeting[]) => {
+        setMeetings(Array.isArray(m) ? m : []);
+      })
+      .catch(() => {
+        setMeetings((prev) => prev ?? []);
+      });
+  };
+
   useEffect(() => {
     let cancelled = false;
     vfetch(`${BASE}/settings`)
@@ -565,14 +671,7 @@ function App() {
         if (c && !cancelled) setConfig(c);
       })
       .catch(() => {});
-    vfetch(`${BASE}/meetings`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((m: Meeting[]) => {
-        if (!cancelled) setMeetings(Array.isArray(m) ? m : []);
-      })
-      .catch(() => {
-        if (!cancelled) setMeetings([]);
-      });
+    refreshMeetings();
     return () => {
       cancelled = true;
     };
@@ -592,6 +691,12 @@ function App() {
             provider={config?.provider ?? null}
             meetings={meetings}
             onSelect={(m) => setSelected(m)}
+            onRefresh={() => {
+              // Refresh now, then again shortly after: the runtime records
+              // the new meeting a moment after the join request returns.
+              refreshMeetings();
+              setTimeout(refreshMeetings, 3000);
+            }}
           />
         </>
       )}
