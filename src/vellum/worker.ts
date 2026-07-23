@@ -77,7 +77,7 @@ import {
 import { getMeetConfig } from "./meet/meet-config.ts";
 import { setMeetHost } from "./meet/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
-import { augmentProcessPath } from "../path-env.ts";
+import { augmentProcessEnv } from "../path-env.ts";
 import { ensureBrowserStack } from "./browser-stack.ts";
 import { startMeetIngress } from "./ingress.ts";
 import { createJoinStatusTracker } from "./join-status.ts";
@@ -168,11 +168,14 @@ async function main(): Promise<void> {
     Buffer.from(encoded, "base64").toString("utf-8"),
   ) as VellumWorkerArgs;
 
-  // Re-augment PATH in this process too (the supervisor already hands us
-  // an augmented one): the browser-stack probes, apt-get, and every bot
-  // process inherit process.env from here, so this is the single choke
-  // point that keeps /data/system/bin and friends visible downstream.
-  const addedPathDirs = augmentProcessPath();
+  // Re-augment this process's env too (the supervisor already hands us an
+  // augmented one): PATH for binary discovery, LD_LIBRARY_PATH so the
+  // dynamic loader finds the relocated apt root's shared libraries (e.g.
+  // pulseaudio's private libpulsecore dir), and PULSE_DL_SEARCH_PATH for
+  // pulseaudio's dlopen'd modules. The browser-stack probes, apt-get, and
+  // every bot process inherit process.env from here, so this is the single
+  // choke point that keeps /data/system visible downstream.
+  const envAdditions = augmentProcessEnv();
 
   const sendToParent: SendToParent = send;
   // Streaming transcription rides the stdio relay: the daemon owns the real
@@ -193,10 +196,12 @@ async function main(): Promise<void> {
   });
   setMeetHost(host);
   const log = host.logger.get("vellum-runtime");
-  if (addedPathDirs.length > 0) {
-    log.info("added missing well-known bin directories to PATH", {
-      added: addedPathDirs,
-    });
+  if (
+    envAdditions.addedPathDirs.length > 0 ||
+    envAdditions.addedLibDirs.length > 0 ||
+    envAdditions.pulseModuleDir
+  ) {
+    log.info("augmented spawn environment for relocated system tools", envAdditions);
   }
 
   // Bot backend probe, mirroring meet-join's init hook: a Docker container

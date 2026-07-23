@@ -315,7 +315,7 @@ export async function vellumControlPost(
     throw new Error(
       `could not reach the Vellum Runtime at 127.0.0.1:${port} (connection refused). ` +
         'The plugin may not be loaded with provider "vellum", or the runtime failed to start. ' +
-        "Reload it with: bun skills/meeting-bot/scripts/reload.ts",
+        "Reload the plugin with: assistant plugins disable meeting-bot && assistant plugins enable meeting-bot",
     );
   }
   const text = await res.text();

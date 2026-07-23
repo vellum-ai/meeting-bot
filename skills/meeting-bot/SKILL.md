@@ -61,15 +61,19 @@ bun skills/meeting-bot/scripts/leave.ts
 ## Reloading the provider runtime
 
 If the meeting runtime seems wedged (no events arriving, joins failing after
-an environment change), reload it:
+an environment change), reload the plugin by running these two commands
+(there is no reload script; the plugin never self-disables or self-enables):
 
 ```bash
-bun skills/meeting-bot/scripts/reload.ts
+assistant plugins disable meeting-bot
+assistant plugins enable meeting-bot
 ```
 
-This bounces the plugin so the configured provider runtime (Recall receiver
-or Vellum Runtime) tears down and restarts. Switching providers does not need
-this; the dashboard's provider control restarts runtimes on its own.
+The configured provider runtime (Recall receiver or Vellum Runtime) restarts
+when the plugin re-initializes on the next conversation turn. (Once the CLI
+grows an `assistant plugins reload` command, use that instead.) Switching
+providers does not need this; the dashboard's provider control restarts
+runtimes on its own.
 
 ## Supported platforms
 

@@ -22,8 +22,18 @@ set -euo pipefail
 # Start the PulseAudio daemon in the background if it is not already running.
 # `--exit-idle-time=-1` prevents it from exiting when no clients are connected,
 # which happens briefly between the daemon launching and Chrome attaching.
+#
+# PULSE_DL_SEARCH_PATH (set by the vellum worker's env augmentation when
+# pulseaudio is installed under a relocated apt root like /data/system)
+# points at the relocated `pulse-<version>/modules` directory; the daemon's
+# compile-time module path refers to the non-relocated /usr tree, so
+# without --dl-search-path every load-module below would fail.
 if ! pactl info >/dev/null 2>&1; then
-  pulseaudio --start --exit-idle-time=-1
+  if [ -n "${PULSE_DL_SEARCH_PATH:-}" ]; then
+    pulseaudio --start --exit-idle-time=-1 --dl-search-path="${PULSE_DL_SEARCH_PATH}"
+  else
+    pulseaudio --start --exit-idle-time=-1
+  fi
 fi
 
 # Wait for the daemon to become reachable. `pulseaudio --start` returns before

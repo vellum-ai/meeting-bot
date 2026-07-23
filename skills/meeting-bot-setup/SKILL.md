@@ -41,17 +41,18 @@ assistant credentials set --service meeting-bot --field api_key "<their_key>"
 
 ## Step 4: Reload the plugin
 
-After the key is stored, run the reload script to re-initialize the plugin so it picks up the new key and starts the realtime server:
+After the key is stored, reload the plugin so it picks up the new key and starts the realtime server. Run these two commands yourself (the plugin never self-disables or self-enables):
 
 ```bash
-bun skills/meeting-bot-setup/scripts/reload.ts
+assistant plugins disable meeting-bot
+assistant plugins enable meeting-bot
 ```
 
-The script verifies the key is set, then disables and re-enables the plugin to trigger re-initialization.
+The reload takes effect on the next conversation turn. (Once the CLI grows an `assistant plugins reload` command, use that instead.)
 
 ## Step 5: Confirm
 
-After the reload script succeeds, tell the user the Meeting Bot is ready to use. They can now ask the assistant to join meetings by providing a meeting URL.
+After the reload, tell the user the Meeting Bot is ready to use. They can now ask the assistant to join meetings by providing a meeting URL.
 
 ## Region configuration
 
