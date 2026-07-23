@@ -58,23 +58,6 @@ When only one bot is active, `--bot-id` can be omitted:
 bun skills/meeting-bot/scripts/leave.ts
 ```
 
-## Reloading the provider runtime
-
-If the meeting runtime seems wedged (no events arriving, joins failing after
-an environment change), reload the plugin by running these two commands
-(there is no reload script; the plugin never self-disables or self-enables):
-
-```bash
-assistant plugins disable meeting-bot
-assistant plugins enable meeting-bot
-```
-
-The configured provider runtime (Recall receiver or Vellum Runtime) restarts
-when the plugin re-initializes on the next conversation turn. (Once the CLI
-grows an `assistant plugins reload` command, use that instead.) Switching
-providers does not need this; the dashboard's provider control restarts
-runtimes on its own.
-
 ## Supported platforms
 
 Recall.ai supports Google Meet, Zoom, Microsoft Teams, Webex, and more. Any meeting URL Recall accepts works here.

@@ -144,7 +144,7 @@ export async function startProviderRuntime(
  * not running, so this is callable regardless of which provider is active.
  */
 export async function stopProviderRuntimes(ctx: InitContext): Promise<void> {
-  await shutdownVellumRuntime();
+  await shutdownVellumRuntime(ctx.logger);
   await stopRealtimeServer();
   await teardownInbound(ctx.logger);
 }
