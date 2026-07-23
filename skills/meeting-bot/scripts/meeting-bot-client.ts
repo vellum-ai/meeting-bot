@@ -51,7 +51,7 @@ export function getApiKey(): string {
  * The script lives at <plugin-root>/skills/meeting-bot/scripts/meeting-bot-client.ts.
  * The data directory is at <plugin-root>/data/.
  */
-export function findPluginDataDir(): string {
+function findPluginDataDir(): string {
   // `new URL(".", import.meta.url).pathname` is already the directory that
   // contains this script (skills/meeting-bot/scripts/, with a trailing slash).
   // Do NOT wrap it in dirname(): that drops the "scripts" segment and
@@ -315,7 +315,7 @@ export async function vellumControlPost(
     throw new Error(
       `could not reach the Vellum Runtime at 127.0.0.1:${port} (connection refused). ` +
         'The plugin may not be loaded with provider "vellum", or the runtime failed to start. ' +
-        "Reload it with: bun skills/meeting-bot/scripts/reload.ts",
+        "Reload the plugin with: assistant plugins disable meeting-bot && assistant plugins enable meeting-bot",
     );
   }
   const text = await res.text();

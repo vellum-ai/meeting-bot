@@ -17,7 +17,6 @@ import { teardownInbound } from "../src/inbound.ts";
 import type { Logger } from "../src/realtime-server.ts";
 import { stopRealtimeServer } from "../src/realtime-server.ts";
 import { shutdownVellumRuntime } from "../src/vellum/runtime.ts";
-import { stopReloadWatcher } from "./init.ts";
 
 const noopLogger: Logger = {
   info: () => {},
@@ -27,7 +26,6 @@ const noopLogger: Logger = {
 };
 
 const shutdown = async (_ctx: ShutdownContext): Promise<void> => {
-  stopReloadWatcher();
   // Vellum Runtime teardown (safe no-op when the runtime never started):
   // active meetings leave, then the subprocess exits.
   await shutdownVellumRuntime();
