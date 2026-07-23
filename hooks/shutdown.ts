@@ -28,7 +28,7 @@ const noopLogger: Logger = {
 const shutdown = async (_ctx: ShutdownContext): Promise<void> => {
   // Vellum Runtime teardown (safe no-op when the runtime never started):
   // active meetings leave, then the subprocess exits.
-  await shutdownVellumRuntime();
+  await shutdownVellumRuntime(noopLogger);
   await stopRealtimeServer();
   // ShutdownContext does not carry a logger, so use a noop logger for
   // tunnel teardown — the tunnel process is being killed anyway.

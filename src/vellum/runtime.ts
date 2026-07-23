@@ -31,7 +31,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import type { InitContext } from "@vellumai/plugin-api";
@@ -54,6 +54,11 @@ import {
   removePersistedSession,
 } from "../session-store.ts";
 import { MeetBotEventSchema, type MeetBotEvent } from "./meet/contracts/index.ts";
+import {
+  reapStaleWorker,
+  removeWorkerPidFile,
+  writeWorkerPidFile,
+} from "../worker-pidfile.ts";
 import { openTranscriptionSession } from "./stt-api.ts";
 import { createDaemonSttBridge, type DaemonSttBridge } from "./stt-bridge.ts";
 
@@ -64,6 +69,22 @@ import { createDaemonSttBridge, type DaemonSttBridge } from "./stt-bridge.ts";
  * file is deleted at startup to keep stale ports out of QA sessions.
  */
 const LEGACY_CONTROL_FILE = "vellum-control.json";
+
+/**
+ * PID file for the worker, under data/. The in-memory child handle is the
+ * normal supervision path; the PID file is the backstop that lets the next
+ * init (and the shutdown hook) reap a worker this module lost track of
+ * (daemon module reloaded without a clean shutdown, init crashed between
+ * spawn and ready), so an orphan can never survive a plugin disable or
+ * hold the control port against a restart.
+ */
+const VELLUM_WORKER_PID_FILE = "vellum-worker.pid";
+/** Cmdline marker verifying a recorded PID still runs our worker script. */
+const VELLUM_WORKER_CMDLINE_MARKER = "vellum/worker";
+
+function vellumPidFilePath(): string {
+  return join(pluginDataDir(), VELLUM_WORKER_PID_FILE);
+}
 
 /**
  * Resolve the assistant workspace directory (moved here from the deleted
@@ -321,17 +342,22 @@ function handleWorkerMessage(
  * Spawn the Vellum Runtime worker. Resolves once it signals readiness.
  * Idempotent: a second call while running is a no-op.
  */
-export function initVellumRuntime(
+export async function initVellumRuntime(
   ctx: InitContext,
   config: MeetingBotConfig,
 ): Promise<void> {
-  if (running) return Promise.resolve();
+  if (running) return;
 
   try {
+    mkdirSync(pluginDataDir(), { recursive: true });
     rmSync(join(pluginDataDir(), LEGACY_CONTROL_FILE), { force: true });
   } catch {
     // best-effort cleanup of the legacy endpoint file
   }
+
+  // Reap any worker a previous load left behind (its listen port must be
+  // free before the replacement binds).
+  await reapStaleWorker(vellumPidFilePath(), VELLUM_WORKER_CMDLINE_MARKER, ctx.logger);
 
   return new Promise<void>((resolve, reject) => {
     const args = {
@@ -374,6 +400,12 @@ export function initVellumRuntime(
       }),
     };
     running = state;
+
+    // Record the PID so a future daemon load (or the shutdown hook, when
+    // this module's state was lost) can reap this worker.
+    if (typeof child.pid === "number") {
+      writeWorkerPidFile(vellumPidFilePath(), child.pid);
+    }
 
     const readyTimer = setTimeout(() => {
       if (!state.ready) {
@@ -423,6 +455,7 @@ export function initVellumRuntime(
     child.on("exit", (code, signal) => {
       clearTimeout(readyTimer);
       state.sttBridge.stopAll();
+      removeWorkerPidFile(vellumPidFilePath());
       if (!state.ready) {
         running = null;
         reject(new Error(`Vellum Runtime worker exited before readiness (code=${code}, signal=${signal})`));
@@ -451,13 +484,29 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   });
 }
 
+const reapFallbackLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+};
+
 /**
  * Stop the Vellum Runtime worker: graceful "stop" on stdin (bots leave),
  * then SIGTERM/SIGKILL. Safe when not running.
+ *
+ * When this module has no tracked child (e.g. its state was lost across a
+ * daemon module reload without a clean shutdown), the recorded PID file is
+ * reaped instead, so a plugin disable always takes the worker down.
  */
-export async function shutdownVellumRuntime(): Promise<void> {
-  if (!running) return;
-  const { child, logger, sttBridge } = running;
+export async function shutdownVellumRuntime(
+  logger: Logger = reapFallbackLogger,
+): Promise<void> {
+  if (!running) {
+    await reapStaleWorker(vellumPidFilePath(), VELLUM_WORKER_CMDLINE_MARKER, logger);
+    return;
+  }
+  const { child, logger: runLogger, sttBridge } = running;
   running = null;
 
   sttBridge.stopAll();
@@ -470,7 +519,7 @@ export async function shutdownVellumRuntime(): Promise<void> {
 
   const exited = await waitForExit(child, STOP_GRACE_MS);
   if (!exited) {
-    logger.warn({}, "meeting-bot: Vellum Runtime did not exit gracefully, sending SIGTERM");
+    runLogger.warn({}, "meeting-bot: Vellum Runtime did not exit gracefully, sending SIGTERM");
     try {
       child.kill("SIGTERM");
     } catch {
@@ -485,5 +534,6 @@ export async function shutdownVellumRuntime(): Promise<void> {
       }
     }
   }
-  logger.info({}, "meeting-bot: Vellum Runtime stopped");
+  removeWorkerPidFile(vellumPidFilePath());
+  runLogger.info({}, "meeting-bot: Vellum Runtime stopped");
 }

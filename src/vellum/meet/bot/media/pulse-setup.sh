@@ -23,22 +23,39 @@ set -euo pipefail
 # `--exit-idle-time=-1` prevents it from exiting when no clients are connected,
 # which happens briefly between the daemon launching and Chrome attaching.
 #
+# Started with `--daemonize=no` in a shell background job rather than
+# `--start`: --start makes pulseaudio re-execute its own binary, which
+# requires canonicalizing its binary path, and that fails when pulseaudio
+# runs from a relocated apt root ("Couldn't canonicalize binary path,
+# cannot self execute"). A plain background process needs no self-exec, and
+# its stderr flows into this script's output so daemon-side failures land
+# in the captured bot log. The daemon survives this script exiting (it is
+# simply reparented); the `pactl info` guard keeps repeat invocations from
+# stacking daemons.
+#
 # PULSE_DL_SEARCH_PATH (set by the vellum worker's env augmentation when
 # pulseaudio is installed under a relocated apt root like /data/system)
 # points at the relocated `pulse-<version>/modules` directory; the daemon's
 # compile-time module path refers to the non-relocated /usr tree, so
 # without --dl-search-path every load-module below would fail.
+#
+# Running as root: per-user pulseaudio logs "This program is not intended
+# to be run as root" as a warning but proceeds; the fatal error observed
+# alongside it was the self-exec canonicalization above. If a future
+# pulseaudio build makes root fatal, the sanctioned path is a --system
+# instance (different socket + auth model), not suppressing the warning.
 if ! pactl info >/dev/null 2>&1; then
+  set -- --daemonize=no --exit-idle-time=-1 --log-target=stderr
   if [ -n "${PULSE_DL_SEARCH_PATH:-}" ]; then
-    pulseaudio --start --exit-idle-time=-1 --dl-search-path="${PULSE_DL_SEARCH_PATH}"
-  else
-    pulseaudio --start --exit-idle-time=-1
+    set -- "$@" --dl-search-path="${PULSE_DL_SEARCH_PATH}"
   fi
+  pulseaudio "$@" &
 fi
 
-# Wait for the daemon to become reachable. `pulseaudio --start` returns before
-# the socket is necessarily accepting connections, so poll pactl briefly.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+# Wait for the daemon to become reachable: the background daemon needs a
+# moment to bind its socket (longer when loading relocated modules), so
+# poll pactl briefly.
+for _ in $(seq 1 25); do
   if pactl info >/dev/null 2>&1; then
     break
   fi
