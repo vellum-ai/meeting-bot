@@ -10,17 +10,19 @@
  * waits for that outcome, so the restart completes on THIS conversation
  * turn and the printed message reflects what actually happened.
  *
- * Fallback: when no result arrives (the plugin is not loaded, so no
- * watcher is running), the script falls back to bouncing the plugin via
- * `assistant plugins disable` / `enable`, which the host reconciles at the
- * next conversation-turn boundary; the message says so honestly.
+ * When no result arrives (the plugin is not loaded, so no watcher is
+ * running), the script reports that and exits nonzero. It deliberately
+ * does NOT fall back to `assistant plugins disable` / `enable`: a plugin
+ * must never self-disable or self-enable (side effects beyond the
+ * runtime, and a disabled plugin's scripts may not be able to re-enable
+ * it). The reload's whole job is reusing the runtime start/stop logic
+ * that backs the init and shutdown hooks.
  *
  * Usage:
  *   bun reload.ts
  */
 
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -35,48 +37,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function run(cmd: string): { ok: boolean; output: string } {
-  try {
-    const output = execSync(cmd, {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-    return { ok: true, output };
-  } catch (err) {
-    const output = err instanceof Error ? err.message : String(err);
-    return { ok: false, output };
-  }
-}
-
-/** Bounce the plugin via disable/enable; takes effect on the NEXT turn. */
-function fallbackPluginBounce(provider: string): void {
-  const disable = run("assistant plugins disable meeting-bot");
-  if (!disable.ok) {
-    console.error(`Failed to disable plugin: ${disable.output}`);
-    process.exit(1);
-  }
-  try {
-    execSync("sleep 0.5");
-  } catch {
-    // sleep may be unavailable; continue anyway
-  }
-  const enable = run("assistant plugins enable meeting-bot");
-  if (!enable.ok) {
-    console.error(`Failed to enable plugin: ${enable.output}`);
-    process.exit(1);
-  }
-  console.log(
-    `meeting-bot was not responding to live reload (plugin not loaded?); bounced it via disable/enable instead. ` +
-      `The ${provider} provider runtime initializes on the next conversation turn.`,
-  );
-}
-
 async function main(): Promise<void> {
   let provider = "recall";
   try {
     provider = getResolvedConfig().provider ?? "recall";
   } catch {
-    // No resolved config yet; the reload below still (re)initializes it.
+    // No resolved config yet (plugin never initialized). The request below
+    // will go unanswered and the timeout message covers it.
   }
 
   console.error(`Reloading meeting-bot (provider: ${provider})...`);
@@ -113,7 +80,13 @@ async function main(): Promise<void> {
     }
   }
 
-  fallbackPluginBounce(provider);
+  console.error(
+    `meeting-bot did not respond to the reload request within ${RESULT_WAIT_MS / 1000}s. ` +
+      `The plugin does not appear to be loaded (its reload watcher runs from the init hook), ` +
+      `so there is no ${provider} provider runtime to restart. ` +
+      `Ensure the meeting-bot plugin is installed and enabled, then run this script again.`,
+  );
+  process.exit(1);
 }
 
 await main();
