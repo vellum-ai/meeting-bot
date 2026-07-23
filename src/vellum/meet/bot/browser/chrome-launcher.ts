@@ -23,6 +23,8 @@
  */
 
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 import { AVATAR_DEVICE_PATH_DEFAULT } from "../../shared/avatar-device-path.js";
 
@@ -190,6 +192,33 @@ const CHROME_BINARY_CANDIDATES = [
 ] as const;
 
 /**
+ * Real chromium ELF locations relative to a relocated apt root, most
+ * common first (Debian's chromium package, then Ubuntu's legacy layout).
+ */
+const RELOCATED_CHROME_BINARIES = [
+  "usr/lib/chromium/chromium",
+  "usr/lib/chromium-browser/chromium-browser",
+] as const;
+
+/**
+ * Under a relocated apt root the `bin/chromium` on PATH is Debian's shell
+ * wrapper, which sources `/etc/chromium.d/*` at an absolute path that does
+ * not exist outside a real install ("cannot open /etc/chromium.d/*",
+ * exit 2). The real ELF works fine there: every flag the wrapper would add
+ * is passed explicitly by {@link buildChromeArgs} (including the sandbox
+ * flags), and the launch env already carries the relocated
+ * LD_LIBRARY_PATH. Returns null when no relocated root is present.
+ */
+function relocatedChromeBinary(): string | null {
+  const root = process.env.VELLUM_APT_DATA_ROOT?.trim() || "/data/system";
+  for (const rel of RELOCATED_CHROME_BINARIES) {
+    const candidate = join(root, rel);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
  * Resolve the browser binary: `CHROME_BINARY` env override first, then the
  * PATH (which the direct runner augments with the relocated apt root's bin
  * dir), then the container's `/usr/bin/chromium` as the last resort so the
@@ -198,6 +227,11 @@ const CHROME_BINARY_CANDIDATES = [
 export function defaultChromeBinary(): string {
   const fromEnv = process.env.CHROME_BINARY?.trim();
   if (fromEnv) return fromEnv;
+  // The relocated real binary is preferred over PATH: on relocated roots
+  // PATH resolves to the broken wrapper script (see above), and on hosts
+  // without a relocated root this probe is a cheap miss.
+  const relocated = relocatedChromeBinary();
+  if (relocated !== null) return relocated;
   for (const name of CHROME_BINARY_CANDIDATES) {
     // PATH is passed explicitly: Bun.which snapshots the process env at
     // startup, so it would miss in-process PATH augmentation otherwise.
