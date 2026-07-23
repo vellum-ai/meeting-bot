@@ -110,6 +110,53 @@ describe("setupPulseAudio", () => {
     expect(msg).toContain("PulseAudio daemon did not come up");
   });
 
+  test("resolves even when a background daemon holds the stderr pipe open", async () => {
+    // pulse-setup.sh backgrounds the PulseAudio daemon, which inherits
+    // nothing of the script's pipes anymore, but any future grandchild
+    // that does must not block boot. Simulate it: the script exits 0
+    // while its stderr stream NEVER closes. setupPulseAudio must resolve
+    // within its drain grace instead of waiting for EOF forever.
+    const neverEndingStderr = new ReadableStream<Uint8Array>({
+      start() {
+        // Never closed, never errored: the pipe stays open.
+      },
+    });
+    const spawn = ((..._args: SpawnArgs): SpawnReturn =>
+      ({
+        stderr: neverEndingStderr,
+        exited: Promise.resolve(0),
+      }) as unknown as SpawnReturn) as typeof Bun.spawn;
+
+    await setupPulseAudio(spawn); // must not hang
+  });
+
+  test("failure output written before exit survives an unclosed pipe", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const stderr = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c;
+      },
+    });
+    controller.enqueue(
+      new TextEncoder().encode("pulse-setup: PulseAudio daemon did not come up\n"),
+    );
+    // Stream intentionally left open.
+    const spawn = ((..._args: SpawnArgs): SpawnReturn =>
+      ({
+        stderr,
+        exited: Promise.resolve(1),
+      }) as unknown as SpawnReturn) as typeof Bun.spawn;
+
+    let thrown: unknown;
+    try {
+      await setupPulseAudio(spawn);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("did not come up");
+  });
+
   test("error message omits the colon when stderr is empty", async () => {
     const fake: FakeProcess = {
       cmd: [],

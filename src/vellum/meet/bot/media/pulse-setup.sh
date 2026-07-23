@@ -27,11 +27,16 @@ set -euo pipefail
 # `--start`: --start makes pulseaudio re-execute its own binary, which
 # requires canonicalizing its binary path, and that fails when pulseaudio
 # runs from a relocated apt root ("Couldn't canonicalize binary path,
-# cannot self execute"). A plain background process needs no self-exec, and
-# its stderr flows into this script's output so daemon-side failures land
-# in the captured bot log. The daemon survives this script exiting (it is
-# simply reparented); the `pactl info` guard keeps repeat invocations from
-# stacking daemons.
+# cannot self execute"). A plain background process needs no self-exec.
+# The daemon survives this script exiting (it is simply reparented); the
+# `pactl info` guard keeps repeat invocations from stacking daemons.
+#
+# The daemon's own output goes to PULSE_LOG_FILE, NOT to this script's
+# stderr: the bot reads this script's output pipes, and a long-lived
+# daemon that inherited them would hold them open forever, blocking the
+# bot's boot on a read-to-EOF (and a pipe closed later would EPIPE the
+# daemon mid-meeting). On startup failure the log tail is echoed below so
+# the cause still lands in the captured bot log.
 #
 # PULSE_DL_SEARCH_PATH (set by the vellum worker's env augmentation when
 # pulseaudio is installed under a relocated apt root like /data/system)
@@ -57,13 +62,16 @@ set -euo pipefail
 # with --daemonize=no. If a future pulseaudio build makes root fatal, the
 # sanctioned path is a --system instance (different socket + auth model),
 # not suppressing the warning.
+PULSE_LOG_FILE="${PULSE_LOG_FILE:-${TMPDIR:-/tmp}/vellum-pulseaudio.log}"
+
 if ! pactl info >/dev/null 2>&1; then
   set -- --daemonize=no --exit-idle-time=-1 --log-target=stderr \
     -n --load=module-native-protocol-unix
   if [ -n "${PULSE_DL_SEARCH_PATH:-}" ]; then
     set -- "$@" --dl-search-path="${PULSE_DL_SEARCH_PATH}"
   fi
-  pulseaudio "$@" &
+  : >"${PULSE_LOG_FILE}" || PULSE_LOG_FILE=/dev/null
+  pulseaudio "$@" >>"${PULSE_LOG_FILE}" 2>&1 &
 fi
 
 # Wait for the daemon to become reachable: the background daemon needs a
@@ -78,6 +86,10 @@ done
 
 if ! pactl info >/dev/null 2>&1; then
   echo "pulse-setup: PulseAudio daemon did not come up" >&2
+  if [ -f "${PULSE_LOG_FILE}" ]; then
+    echo "pulse-setup: daemon log tail (${PULSE_LOG_FILE}):" >&2
+    tail -n 50 "${PULSE_LOG_FILE}" >&2 || true
+  fi
   exit 1
 fi
 
