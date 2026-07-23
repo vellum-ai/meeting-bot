@@ -74,16 +74,20 @@ const LIB_ARCHES = ["x86_64-linux-gnu", "aarch64-linux-gnu"] as const;
 /**
  * Shared-library directories under the relocated apt root, mirroring the
  * assistant's own shell env (usr/lib/<arch>, usr/lib, usr/local/lib) plus
- * pulseaudio's PRIVATE lib subdir: libpulsecore lives in
- * `usr/lib/<arch>/pulseaudio/`, normally found via the binary's baked
- * RUNPATH, which points at the non-relocated /usr path and therefore
- * breaks under the apt root. Only directories that exist are returned.
+ * two pulseaudio-private dirs whose contents are normally found via baked
+ * RUNPATHs that point at the non-relocated /usr tree and therefore break
+ * under the apt root: `usr/lib/<arch>/pulseaudio/` (libpulsecore) and the
+ * dlopen module dir itself (`pulse-<version>/modules/`), which also holds
+ * the modules' shared support libraries such as libprotocol-native.so.
+ * Only directories that exist are returned.
  */
 export function libraryCandidates(root: string = aptDataRoot()): string[] {
   const dirs: string[] = [];
   for (const arch of LIB_ARCHES) dirs.push(join(root, "usr/lib", arch));
   dirs.push(join(root, "usr/lib"), join(root, "usr/local/lib"));
   for (const arch of LIB_ARCHES) dirs.push(join(root, "usr/lib", arch, "pulseaudio"));
+  const modules = pulseModuleDir(root);
+  if (modules) dirs.push(modules);
   return dirs.filter((d) => existsSync(d));
 }
 

@@ -67,6 +67,14 @@ describe("libraryCandidates / pulseModuleDir", () => {
     expect(dirs).not.toContain(join(root, "usr/lib/aarch64-linux-gnu"));
   });
 
+  test("includes the pulse modules dir so module support libs resolve", async () => {
+    const { libraryCandidates } = await import("../path-env.ts");
+    const root = fakeRoot();
+    expect(libraryCandidates(root)).toContain(
+      join(root, "usr/lib/x86_64-linux-gnu/pulse-17.0/modules"),
+    );
+  });
+
   test("finds pulseaudio's relocated module directory", async () => {
     const { pulseModuleDir } = await import("../path-env.ts");
     const root = fakeRoot();
@@ -74,6 +82,18 @@ describe("libraryCandidates / pulseModuleDir", () => {
       join(root, "usr/lib/x86_64-linux-gnu/pulse-17.0/modules"),
     );
     expect(pulseModuleDir(tmp())).toBeNull();
+  });
+
+  test("finds a version-suffixed module dir outside the arch triplet", async () => {
+    // Ubuntu 24.04 installs modules at usr/lib/pulse-16.1+dfsg1/modules.
+    const { pulseModuleDir } = await import("../path-env.ts");
+    const root = tmp();
+    mkdirSync(join(root, "usr/lib/pulse-16.1+dfsg1/modules"), {
+      recursive: true,
+    });
+    expect(pulseModuleDir(root)).toBe(
+      join(root, "usr/lib/pulse-16.1+dfsg1/modules"),
+    );
   });
 
   test("prependedLibraryPath puts relocated dirs first without duplicating", async () => {
