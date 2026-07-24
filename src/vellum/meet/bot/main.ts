@@ -70,7 +70,12 @@ import {
 } from "./browser/chrome-launcher.js";
 import { xdotoolClick } from "./browser/xdotool-click.js";
 import { xdotoolType } from "./browser/xdotool-type.js";
-import { startXvfb, stopXvfb, type XvfbHandle } from "./browser/xvfb.js";
+import {
+  displayConnectable,
+  startXvfb,
+  stopXvfb,
+  type XvfbHandle,
+} from "./browser/xvfb.js";
 import { DaemonClient } from "./control/daemon-client.js";
 import {
   createHttpServer,
@@ -237,6 +242,8 @@ export interface BotDeps {
   startXvfb: (display: string) => Promise<XvfbHandle>;
   /** Tear down an Xvfb handle. */
   stopXvfb: (handle: XvfbHandle) => Promise<void>;
+  /** True when an X server currently accepts connections on the display. */
+  displayConnectable: (display: string) => Promise<boolean>;
   /** Create (but do not start) the NMH socket server. */
   createNmhSocketServer: (opts: NmhSocketServerOptions) => NmhSocketServer;
   /** Spawn chromium. Returns a handle with exitPromise + stop. */
@@ -342,8 +349,15 @@ export function defaultDeps(): BotDeps {
   return {
     env: () => readEnv(process.env),
     setupPulseAudio,
-    startXvfb,
+    startXvfb: (display) =>
+      startXvfb(display, {
+        logger: {
+          info: (m) => console.log(m),
+          error: (m) => console.error(m),
+        },
+      }),
     stopXvfb,
+    displayConnectable,
     createNmhSocketServer: (opts) => createNmhSocketServer(opts),
     launchChrome: (opts) => launchChrome(opts),
     xdotoolClick: (opts) => xdotoolClick(opts),
@@ -805,9 +819,20 @@ export async function runBot(deps: BotDeps): Promise<void> {
     // ---------------------------------------------------------------------
     // Step 5 — Chrome.
     //
+    // Last-instant display guard: startXvfb verified the display accepted
+    // connections, but the server can die between then and now (and has,
+    // in QA). Failing here yields a precise, attributable error in the
+    // bot log instead of Chrome's generic "Missing X server or $DISPLAY".
+    //
     // The handle's `exitPromise` is watched below; if Chrome dies before
     // we've intentionally shut down, treat it as an unexpected failure.
     // ---------------------------------------------------------------------
+    if (!(await deps.displayConnectable(env.xvfbDisplay))) {
+      throw new Error(
+        `X display ${env.xvfbDisplay} stopped accepting connections after Xvfb startup; aborting before Chrome launch`,
+      );
+    }
+
     subsystems.chrome = await deps.launchChrome({
       meetingUrl: meetUrl,
       displayNumber: env.xvfbDisplay,

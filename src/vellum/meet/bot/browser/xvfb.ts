@@ -30,10 +30,16 @@ export interface XvfbHandle {
   /** The X display string we started on, e.g. `":99"`. */
   readonly display: string;
   /**
-   * The Xvfb child process, or `null` if we detected an existing server via
-   * the lock file and skipped spawning our own.
+   * The Xvfb child process, or `null` if a server already accepting
+   * connections on the display was reused instead of spawning our own.
    */
   readonly process: Subprocess | null;
+}
+
+/** Logger slice consumed by {@link startXvfb} for post-startup visibility. */
+export interface XvfbLogger {
+  info: (message: string) => void;
+  error: (message: string) => void;
 }
 
 const LOCK_WAIT_TIMEOUT_MS = 10_000;
@@ -98,6 +104,49 @@ async function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * True when an X server currently accepts connections on `display`. Used by
+ * the boot path as a last-instant guard before launching Chrome, so a
+ * display that stopped serving after startup fails with a precise message
+ * instead of Chrome's generic "Missing X server or $DISPLAY".
+ */
+export function displayConnectable(display: string): Promise<boolean> {
+  return canConnectToDisplay(parseDisplayIndex(display));
+}
+
+/**
+ * After a successful spawn, keep the server observable: pump its stderr
+ * into the log (X servers report font/extension/client problems there long
+ * after startup) and log loudly if it exits while the bot still runs.
+ * Without this, a post-startup Xvfb death is invisible and only shows up
+ * as Chrome failing to reach the display.
+ */
+/** Servers being torn down on purpose; their exit is not an error. */
+const intentionallyStopped = new WeakSet<Subprocess>();
+
+function observeXvfb(proc: Subprocess, logger: XvfbLogger): void {
+  const stderr = proc.stderr as unknown as AsyncIterable<Uint8Array> | null;
+  if (stderr) {
+    void (async () => {
+      const decoder = new TextDecoder();
+      try {
+        for await (const chunk of stderr) {
+          const text = decoder.decode(chunk, { stream: true }).trim();
+          if (text.length > 0) logger.info(`Xvfb: ${text}`);
+        }
+      } catch {
+        // Stream torn down with the process.
+      }
+    })();
+  }
+  void proc.exited.then((code) => {
+    if (intentionallyStopped.has(proc)) return;
+    logger.error(
+      `Xvfb exited unexpectedly (code=${code}); the display is gone and Chrome cannot render`,
+    );
+  });
+}
+
+/**
  * Start Xvfb on `display` (default `":99"`) and wait for its Unix socket to
  * accept a connection. If a server is already accepting on this display
  * (e.g. an Xvfb left over from a previous bot), it is reused and a handle
@@ -110,12 +159,19 @@ async function sleep(ms: number): Promise<void> {
  * Readiness is a successful connect on `/tmp/.X11-unix/X<N>`, both for
  * reuse and after spawning.
  */
-export async function startXvfb(display = ":99"): Promise<XvfbHandle> {
+export async function startXvfb(
+  display = ":99",
+  opts: { logger?: XvfbLogger } = {},
+): Promise<XvfbHandle> {
+  const logger = opts.logger ?? { info: () => {}, error: () => {} };
   const displayIndex = parseDisplayIndex(display);
   const lockPath = lockFilePath(displayIndex);
   const canonicalDisplay = `:${displayIndex}`;
 
   if (await canConnectToDisplay(displayIndex)) {
+    logger.info(
+      `Xvfb: reusing the X server already accepting on ${canonicalDisplay}`,
+    );
     return { display: canonicalDisplay, process: null };
   }
 
@@ -143,6 +199,10 @@ export async function startXvfb(display = ":99"): Promise<XvfbHandle> {
   const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (await canConnectToDisplay(displayIndex)) {
+      logger.info(
+        `Xvfb: server ready on ${canonicalDisplay} (pid ${proc.pid})`,
+      );
+      observeXvfb(proc, logger);
       return { display: canonicalDisplay, process: proc };
     }
     // If Xvfb died during startup, bail out with a useful error instead of
@@ -175,6 +235,7 @@ export async function startXvfb(display = ":99"): Promise<XvfbHandle> {
 export async function stopXvfb(handle: XvfbHandle): Promise<void> {
   const proc = handle.process;
   if (!proc) return;
+  intentionallyStopped.add(proc);
   if (proc.exitCode !== null) return;
 
   try {
