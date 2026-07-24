@@ -20,10 +20,10 @@
  * mode - direct mode removes the container boundary, not the dependency.
  */
 
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join as pathJoin } from "node:path";
+import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
@@ -69,6 +69,76 @@ function defaultBotMainPath(): string {
   return fileURLToPath(new URL("../bot/main.ts", import.meta.url));
 }
 
+/**
+ * Ensure the built extension exists at `extensionPath`, building it from
+ * the sibling source tree when missing.
+ *
+ * The bot container builds `meet-controller-ext/dist` at image-build time;
+ * direct mode has no image build, so the first join on a host would
+ * otherwise hand Chrome a `--load-extension` path with nothing behind it
+ * ("Manifest file is missing or unreadable") and the ready handshake can
+ * never happen. The build runs offline: the extension's node_modules are
+ * vendored in the plugin tree.
+ */
+export async function ensureExtensionBuilt(
+  extensionPath: string,
+  opts: { spawn?: SpawnFn; logger?: Logger } = {},
+): Promise<void> {
+  if (existsSync(pathJoin(extensionPath, "manifest.json"))) return;
+
+  const log = opts.logger ?? NOOP_LOGGER;
+  const srcDir = pathResolve(extensionPath, "..");
+  const buildScript = pathJoin(srcDir, "scripts", "build.ts");
+  if (!existsSync(buildScript)) {
+    throw new Error(
+      `Meet controller extension dist is missing at ${extensionPath} and there is no build script at ${buildScript}; ` +
+        "Chrome cannot load the extension, so the join would hang waiting for the ready handshake",
+    );
+  }
+
+  log.info("Building the Meet controller extension", { srcDir });
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+  const spawnFn = opts.spawn ?? (Bun.spawn as unknown as SpawnFn);
+  const proc = spawnFn(["bun", "run", "scripts/build.ts"], {
+    env,
+    cwd: srcDir,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const chunks: string[] = [];
+  const decoder = new TextDecoder();
+  const drain = async (
+    stream: ReadableStream<Uint8Array> | null | undefined,
+  ): Promise<void> => {
+    if (!stream) return;
+    try {
+      for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+        chunks.push(decoder.decode(chunk, { stream: true }));
+      }
+    } catch {
+      // Stream torn down with the process.
+    }
+  };
+  const [code] = await Promise.all([
+    proc.exited,
+    drain(proc.stdout),
+    drain(proc.stderr),
+  ]);
+
+  if (code !== 0 || !existsSync(pathJoin(extensionPath, "manifest.json"))) {
+    const output = chunks.join("").trim().slice(-600);
+    throw new Error(
+      `Meet controller extension build failed (exit ${code}); Chrome cannot load the extension${output ? `: ${output}` : ""}`,
+    );
+  }
+  log.info("Meet controller extension built", { extensionPath });
+}
+
 /** Allocate a free loopback TCP port by binding :0 and reading it back. */
 function allocateEphemeralPort(hostIp: string): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -100,6 +170,11 @@ export interface DirectBotRunnerOptions {
   allocatePort?: (hostIp: string) => Promise<number>;
   /** Root for per-meeting scratch dirs (profiles, sockets). Defaults to the OS tmpdir. */
   scratchRoot?: string;
+  /**
+   * Ensure the built extension exists before a bot spawns. Defaults to
+   * {@link ensureExtensionBuilt}; injectable for tests.
+   */
+  ensureExtension?: (extensionPath: string) => Promise<void>;
 }
 
 interface TrackedBot {
@@ -122,7 +197,10 @@ export class DirectBotRunner {
   private readonly spawn: SpawnFn;
   private readonly allocatePort: (hostIp: string) => Promise<number>;
   private readonly scratchRoot: string;
+  private readonly ensureExtension: (extensionPath: string) => Promise<void>;
   private readonly bots = new Map<string, TrackedBot>();
+  /** In-flight/completed extension ensure, shared across concurrent joins. */
+  private extensionReady: Promise<void> | null = null;
 
   constructor(opts: DirectBotRunnerOptions = {}) {
     this.log = opts.logger ?? NOOP_LOGGER;
@@ -131,6 +209,13 @@ export class DirectBotRunner {
     this.spawn = opts.spawn ?? (Bun.spawn as unknown as SpawnFn);
     this.allocatePort = opts.allocatePort ?? allocateEphemeralPort;
     this.scratchRoot = opts.scratchRoot ?? tmpdir();
+    this.ensureExtension =
+      opts.ensureExtension ??
+      ((extensionPath) =>
+        ensureExtensionBuilt(extensionPath, {
+          spawn: this.spawn,
+          logger: this.log,
+        }));
   }
 
   /**
@@ -158,6 +243,18 @@ export class DirectBotRunner {
     mkdirSync(scratchDir, { recursive: true });
 
     const env = this.buildEnv(opts.env ?? {}, port, scratchDir);
+
+    // Build the extension once per runner lifetime (a no-op when the dist
+    // already exists). Serialized so concurrent joins share one build; a
+    // failed build clears the latch so the next join can retry.
+    if (this.extensionReady === null) {
+      const ensure = this.ensureExtension(env.EXTENSION_PATH ?? "");
+      this.extensionReady = ensure;
+      ensure.catch(() => {
+        if (this.extensionReady === ensure) this.extensionReady = null;
+      });
+    }
+    await this.extensionReady;
 
     const proc = this.spawn([this.runtime, "run", this.botMainPath], {
       env,

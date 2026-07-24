@@ -196,6 +196,7 @@ function makeDeps(opts: MakeDepsOpts = {}): {
       if (opts.pulseError) throw opts.pulseError;
     },
     displayConnectable: async () => true,
+    registerNmhManifest: async () => {},
     startXvfb: async (display) => {
       calls.push({ kind: "xvfb.start", display });
       if (opts.xvfbError) throw opts.xvfbError;
