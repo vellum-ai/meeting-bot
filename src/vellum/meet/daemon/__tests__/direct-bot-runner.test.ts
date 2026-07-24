@@ -67,6 +67,12 @@ function makeRunner(proc: FakeProc, allocatedPort = 54321): DirectBotRunner {
     allocatePort: async () => allocatedPort,
     botMainPath: "/plugin/bot/main.ts",
     scratchRoot,
+    // These tests target spawn/lifecycle behavior; the extension-ensure
+    // path is covered by extension-build.test.ts. Without this stub the
+    // default ensure would really build (or hang on the fake spawn's
+    // never-closing streams) whenever the local dist is absent, which is
+    // exactly what CI hit.
+    ensureExtension: async () => {},
   });
 }
 
