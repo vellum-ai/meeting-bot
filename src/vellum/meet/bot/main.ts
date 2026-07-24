@@ -76,6 +76,7 @@ import {
   stopXvfb,
   type XvfbHandle,
 } from "./browser/xvfb.js";
+import { ensureNmhManifestRegistered } from "./native-messaging/register-manifest.js";
 import { DaemonClient } from "./control/daemon-client.js";
 import {
   createHttpServer,
@@ -244,6 +245,15 @@ export interface BotDeps {
   stopXvfb: (handle: XvfbHandle) => Promise<void>;
   /** True when an X server currently accepts connections on the display. */
   displayConnectable: (display: string) => Promise<boolean>;
+  /**
+   * Ensure Chromium can resolve the com.vellum.meet native host for this
+   * meeting's profile (no-op inside the container image, which registers
+   * it at a system path at build time).
+   */
+  registerNmhManifest: (opts: {
+    userDataDir: string;
+    extensionPath: string;
+  }) => Promise<void>;
   /** Create (but do not start) the NMH socket server. */
   createNmhSocketServer: (opts: NmhSocketServerOptions) => NmhSocketServer;
   /** Spawn chromium. Returns a handle with exitPromise + stop. */
@@ -358,6 +368,11 @@ export function defaultDeps(): BotDeps {
       }),
     stopXvfb,
     displayConnectable,
+    registerNmhManifest: (opts) =>
+      ensureNmhManifestRegistered({
+        ...opts,
+        logInfo: (m) => console.log(m),
+      }),
     createNmhSocketServer: (opts) => createNmhSocketServer(opts),
     launchChrome: (opts) => launchChrome(opts),
     xdotoolClick: (opts) => xdotoolClick(opts),
@@ -782,6 +797,15 @@ export async function runBot(deps: BotDeps): Promise<void> {
 
     const userDataDir = `${env.chromeUserDataRoot}-${meetingId}`;
     deps.ensureDir(userDataDir);
+
+    // Register the native-messaging host for this profile before Chrome
+    // starts. Without it, the extension's connectNative finds no host, no
+    // ready handshake ever arrives, and the join times out after 30s with
+    // nothing attributable in the log.
+    await deps.registerNmhManifest({
+      userDataDir,
+      extensionPath: env.extensionPath,
+    });
 
     subsystems.socketServer = deps.createNmhSocketServer({
       socketPath: env.nmhSocketPath,
