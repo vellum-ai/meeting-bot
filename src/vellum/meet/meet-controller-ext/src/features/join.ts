@@ -134,6 +134,40 @@ function fail(
 }
 
 /**
+ * Compact survey of what the page actually shows: visible button
+ * aria-labels/texts, headings, and the document title. Appended to
+ * selector-timeout failures so the daemon log answers "what screen was
+ * the bot on, and did our selectors drift?" without needing eyes on the
+ * browser. Meet's UI strings shift over time; when a wait times out this
+ * is the ground truth to re-derive selectors from.
+ */
+function surveyVisibleUi(doc: Document): string {
+  const clip = (value: string, max: number): string =>
+    value.length > max ? `${value.slice(0, max)}...` : value;
+  const buttons: string[] = [];
+  for (const el of Array.from(doc.querySelectorAll("button"))) {
+    const label =
+      el.getAttribute("aria-label")?.trim() || el.textContent?.trim() || "";
+    if (label.length === 0) continue;
+    buttons.push(clip(label, 60));
+    if (buttons.length >= 25) break;
+  }
+  const headings: string[] = [];
+  for (const el of Array.from(
+    doc.querySelectorAll('h1, h2, [role="heading"]'),
+  )) {
+    const text = el.textContent?.trim() ?? "";
+    if (text.length === 0) continue;
+    headings.push(clip(text, 80));
+    if (headings.length >= 8) break;
+  }
+  return (
+    `page-survey title=${JSON.stringify(doc.title ?? "")} ` +
+    `headings=${JSON.stringify(headings)} buttons=${JSON.stringify(buttons)}`
+  );
+}
+
+/**
  * Drive the Meet prejoin surface to completion and post the consent notice.
  *
  * Resolves once the in-meeting UI has mounted and the consent-message post
@@ -179,7 +213,7 @@ export async function runJoinFlow(opts: RunJoinFlowOptions): Promise<void> {
   } catch {
     fail(
       onEvent,
-      `meet-ext: prejoin surface did not appear within ${PREJOIN_TIMEOUT_MS}ms (url: ${opts.meetingUrl})`,
+      `meet-ext: prejoin surface did not appear within ${PREJOIN_TIMEOUT_MS}ms (url: ${opts.meetingUrl}); ${surveyVisibleUi(doc)}`,
     );
   }
   // Silence an unused-variable warning in strict mode — we only look up
@@ -372,7 +406,7 @@ export async function runJoinFlow(opts: RunJoinFlowOptions): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     fail(
       onEvent,
-      `meet-ext: in-meeting UI did not appear within ${MEETING_ROOM_TIMEOUT_MS}ms (host may not have admitted the bot): ${msg}`,
+      `meet-ext: in-meeting UI did not appear within ${MEETING_ROOM_TIMEOUT_MS}ms (host may not have admitted the bot): ${msg}; ${surveyVisibleUi(doc)}`,
     );
   }
 
