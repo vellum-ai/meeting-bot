@@ -46,7 +46,7 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -76,6 +76,7 @@ import {
   stopXvfb,
   type XvfbHandle,
 } from "./browser/xvfb.js";
+import { captureDisplayScreenshot } from "./browser/screenshot.js";
 import { ensureNmhManifestRegistered } from "./native-messaging/register-manifest.js";
 import { DaemonClient } from "./control/daemon-client.js";
 import {
@@ -121,6 +122,12 @@ import {
  */
 interface BotEnv {
   meetUrl: string | undefined;
+  /**
+   * Directory for failure diagnostics (screenshots). Set by the daemon to
+   * the meeting's out/ dir in direct mode; null when unset (docker mode,
+   * where the host path does not exist inside the container).
+   */
+  diagDir: string | null;
   meetingId: string | undefined;
   joinName: string | undefined;
   consentMessage: string | undefined;
@@ -205,6 +212,7 @@ function parseBooleanEnv(raw: string | undefined): boolean {
 function readEnv(env: NodeJS.ProcessEnv = process.env): BotEnv {
   return {
     meetUrl: env.MEET_URL,
+    diagDir: env.BOT_DIAG_DIR ?? null,
     meetingId: env.MEETING_ID,
     joinName: env.JOIN_NAME,
     consentMessage: env.CONSENT_MESSAGE,
@@ -245,6 +253,11 @@ export interface BotDeps {
   stopXvfb: (handle: XvfbHandle) => Promise<void>;
   /** True when an X server currently accepts connections on the display. */
   displayConnectable: (display: string) => Promise<boolean>;
+  /**
+   * Grab one frame of the X display into `outPath`. Best-effort evidence
+   * for error teardowns; resolves false when capture is unavailable.
+   */
+  captureScreenshot: (display: string, outPath: string) => Promise<boolean>;
   /**
    * Ensure Chromium can resolve the com.vellum.meet native host for this
    * meeting's profile (no-op inside the container image, which registers
@@ -368,6 +381,8 @@ export function defaultDeps(): BotDeps {
       }),
     stopXvfb,
     displayConnectable,
+    captureScreenshot: (display, outPath) =>
+      captureDisplayScreenshot(display, outPath),
     registerNmhManifest: (opts) =>
       ensureNmhManifestRegistered({
         ...opts,
@@ -623,6 +638,24 @@ export async function runBot(deps: BotDeps): Promise<void> {
     shutdownInProgress = true;
     shutdownDonePromise = (async () => {
       BotState.setPhase(finalState === "error" ? "error" : "leaving");
+
+      // Error teardown: grab the display before Chrome goes away. The
+      // pixels show what no DOM survey can (overlays eating clicks,
+      // CAPTCHAs, unexpected render states). Best-effort and bounded.
+      if (finalState === "error" && env.diagDir) {
+        try {
+          const shotPath = join(env.diagDir, "failure.png");
+          const captured = await deps.captureScreenshot(
+            env.xvfbDisplay,
+            shotPath,
+          );
+          if (captured) {
+            deps.logInfo(`meet-bot: captured failure screenshot at ${shotPath}`);
+          }
+        } catch {
+          // Diagnostic only; never block the teardown.
+        }
+      }
 
       // Any in-flight join-deadline timer is now moot.
       clearExtensionJoinedTimer();

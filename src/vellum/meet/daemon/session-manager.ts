@@ -1297,6 +1297,10 @@ class MeetSessionManagerImpl {
     const env: Record<string, string> = {
       MEET_URL: url,
       MEETING_ID: meetingId,
+      // Failure-diagnostics dir (screenshots). Meaningful in direct mode,
+      // where the bot shares the daemon's filesystem; inside a container
+      // the path does not exist and the bot's capture is a no-op.
+      BOT_DIAG_DIR: outDir,
       // `JOIN_NAME` must be non-empty for the bot to take the full-wiring
       // branch (see `skills/meet-join/bot/src/main.ts:needsFullWiring`). Priority is:
       // services.meet.joinName → assistant display name → fallback.

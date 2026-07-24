@@ -435,25 +435,24 @@ export async function runJoinFlow(opts: RunJoinFlowOptions): Promise<void> {
     });
     dispatchAdmissionClick(admissionBtn);
     if (!(await admissionAdvanced(12))) {
+      // The click is verifiably not registering; another 90s of waiting
+      // cannot change that, so fail now with the candidate causes and
+      // the page ground truth. The sign-in note is a possibility, not a
+      // verdict: the signed-out prejoin page shows sign-in affordances
+      // as standard furniture, so its presence alone proves nothing.
       const survey = surveyVisibleUi(doc);
-      // A sign-in heading alongside a click that will not take means the
-      // meeting requires authenticated participants; anonymous guests
-      // cannot knock on consumer-created meetings at all. Waiting the
-      // full 90s cannot succeed, so fail now with the actionable cause.
-      if (/headings=\[[^\]]*sign in/i.test(survey)) {
-        fail(
-          onEvent,
-          "meet-ext: the admission click is not advancing and Meet is offering Google sign-in. " +
-            "This meeting appears to require signed-in participants (consumer-created meetings do not allow anonymous guests to knock), " +
-            "and the bot joins anonymously. Use a meeting hosted by a Workspace account that allows guests to ask to join. " +
-            survey,
-        );
-      }
-      onEvent({
-        type: "diagnostic",
-        level: "error",
-        message: `meet-ext: admission click still not advancing after a retry; continuing to wait in case Meet is slow. ${survey}`,
-      });
+      const signInNote = /headings=\[[^\]]*sign in/i.test(survey)
+        ? " A sign-in prompt is present, which can also mean this meeting only admits signed-in participants."
+        : "";
+      fail(
+        onEvent,
+        "meet-ext: the admission click is not registering with Meet (the prejoin button is still interactable after a retry). " +
+          "Possible causes: the display name was not accepted (see the name-entry readback diagnostic above), " +
+          "the trusted click is missing the button, or Meet is silently rejecting this client's knock." +
+          signInNote +
+          " " +
+          survey,
+      );
     }
   }
 

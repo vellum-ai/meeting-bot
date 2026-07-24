@@ -153,6 +153,7 @@ function makeDeps(opts: MakeDepsOpts = {}): {
   });
 
   const defaultEnv = {
+    diagDir: null as string | null,
     meetUrl: "https://meet.google.com/abc-defg-hij",
     meetingId: "m-1",
     joinName: "Vellum Bot",
@@ -197,6 +198,7 @@ function makeDeps(opts: MakeDepsOpts = {}): {
     },
     displayConnectable: async () => true,
     registerNmhManifest: async () => {},
+    captureScreenshot: async () => false,
     startXvfb: async (display) => {
       calls.push({ kind: "xvfb.start", display });
       if (opts.xvfbError) throw opts.xvfbError;

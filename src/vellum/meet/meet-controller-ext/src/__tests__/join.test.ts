@@ -317,6 +317,35 @@ function removeMediaModal(doc: Document): void {
 }
 
 /**
+ * Wrap a test's onEvent so the admission buttons unmount the moment the
+ * extension reports its click, simulating Meet accepting the knock (the
+ * real page swaps to "Asking to be let in..."). Lets a test drive the
+ * flow past step 4b's click-verification probe into step 5.
+ */
+function unmountAdmissionButtonsOnClick(
+  doc: Document,
+  inner: (e: unknown) => void,
+): (e: unknown) => void {
+  return (e: unknown) => {
+    inner(e);
+    const evt = e as { type?: string; message?: string };
+    if (
+      evt.type === "diagnostic" &&
+      (evt.message ?? "").includes("clicked admission button")
+    ) {
+      for (const sel of [
+        selectors.PREJOIN_JOIN_NOW_BUTTON,
+        selectors.PREJOIN_ASK_TO_JOIN_BUTTON,
+      ]) {
+        for (const el of Array.from(doc.querySelectorAll(sel))) {
+          el.remove();
+        }
+      }
+    }
+  };
+}
+
+/**
  * Inject the minimal chat DOM (message list + composer textarea + send button)
  * into `doc` so step 6's {@link postConsentMessage} call can locate everything
  * it needs. Mounting the message list short-circuits `ensurePanelOpen`, so no
@@ -911,7 +940,7 @@ describe("runJoinFlow (content-script port)", () => {
         displayName: "Vellum Bot",
         consentMessage: "Hi, Vellum is listening.",
         meetingId: "mtg-5",
-        onEvent: (e) => events.push(e),
+        onEvent: unmountAdmissionButtonsOnClick(doc, (e) => events.push(e)),
         doc,
       }),
     ).rejects.toThrow(/in-meeting UI did not appear/i);
@@ -949,6 +978,37 @@ describe("runJoinFlow (content-script port)", () => {
         doc,
       }),
     ).rejects.toThrow(/signed-in participants/i);
+  });
+
+  test("fails fast when the admission click never registers (button stays interactable)", async () => {
+    // No unmount wrapper here: the button survives its own click, as QA
+    // observed via the page survey. The flow must fail at step 4b with
+    // the candidate causes instead of burning the 90s step-5 wait.
+    const { doc } = loadPrejoinDom();
+    removeMediaModal(doc);
+
+    const events: unknown[] = [];
+    await expect(
+      runJoinFlow({
+        meetingUrl: "https://meet.google.com/abc-defg-hij",
+        displayName: "Vellum Bot",
+        consentMessage: "Hi, Vellum is listening.",
+        meetingId: "mtg-click-stuck",
+        onEvent: (e) => events.push(e),
+        doc,
+      }),
+    ).rejects.toThrow(/not registering with Meet/i);
+
+    // The retry diagnostic fired before the failure.
+    const retry = events.find(
+      (e) =>
+        typeof e === "object" &&
+        e !== null &&
+        ((e as { message?: string }).message ?? "").includes(
+          "retrying the trusted click",
+        ),
+    );
+    expect(retry).toBeDefined();
   });
 
   test("fires onAdmitted after admission but before consent post", async () => {
@@ -1042,7 +1102,7 @@ describe("runJoinFlow (content-script port)", () => {
         displayName: "Vellum Bot",
         consentMessage: "Hi, Vellum is listening.",
         meetingId: "mtg-admit-timeout",
-        onEvent: () => {},
+        onEvent: unmountAdmissionButtonsOnClick(doc, () => {}),
         onAdmitted: () => {
           admittedCalls += 1;
         },
@@ -1161,7 +1221,7 @@ describe("runJoinFlow (content-script port)", () => {
         displayName: "Vellum Bot",
         consentMessage: "Hi, Vellum is listening.",
         meetingId: "mtg-leave-button-alone",
-        onEvent: (e) => events.push(e),
+        onEvent: unmountAdmissionButtonsOnClick(doc, (e) => events.push(e)),
         doc,
       }),
     ).rejects.toThrow(/in-meeting UI did not appear/i);
@@ -1204,7 +1264,7 @@ describe("runJoinFlow (content-script port)", () => {
         displayName: "Vellum Bot",
         consentMessage: "Hi, Vellum is listening.",
         meetingId: "mtg-lobby-mic-toggle-alone",
-        onEvent: (e) => events.push(e),
+        onEvent: unmountAdmissionButtonsOnClick(doc, (e) => events.push(e)),
         doc,
       }),
     ).rejects.toThrow(/in-meeting UI did not appear/i);
