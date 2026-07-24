@@ -274,6 +274,21 @@ export async function runJoinFlow(opts: RunJoinFlowOptions): Promise<void> {
     }
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
+    // Read the value back: Meet gates the admission button on a non-empty
+    // name, so a set that silently failed explains a click that goes
+    // nowhere. This line is the evidence.
+    onEvent({
+      type: "diagnostic",
+      level: "info",
+      message: `meet-ext: name entry readback=${JSON.stringify(input.value)} (requested ${JSON.stringify(displayName)})`,
+    });
+  } else {
+    onEvent({
+      type: "diagnostic",
+      level: "info",
+      message:
+        "meet-ext: no name input present on the prejoin surface (signed-in variant, or DOM drift)",
+    });
   }
 
   // Step 4 — wait for the admission button, then click it. Prefer "Join now"
@@ -361,29 +376,86 @@ export async function runJoinFlow(opts: RunJoinFlowOptions): Promise<void> {
   // sibling Chromium (different OS window manager) and re-instrument
   // before changing it.
   // ---------------------------------------------------------------------
-  const rect = (admissionBtn as HTMLElement).getBoundingClientRect();
   const win = opts.window ?? doc.defaultView ?? globalThis;
-  const chromeOffsetY = Math.max(
-    0,
-    (win as typeof globalThis).outerHeight -
-      (win as typeof globalThis).innerHeight,
-  );
-  const screenX = Math.round(
-    ((win as typeof globalThis).screenX ?? 0) + rect.left + rect.width / 2,
-  );
-  const screenY = Math.round(
-    ((win as typeof globalThis).screenY ?? 0) +
-      chromeOffsetY +
-      rect.top +
-      rect.height / 2,
-  );
-  onEvent({ type: "trusted_click", x: screenX, y: screenY });
-  (admissionBtn as HTMLElement).click();
-  onEvent({
-    type: "diagnostic",
-    level: "info",
-    message: `meet-ext: clicked admission button aria-label="${btnLabel}" screen=(${screenX},${screenY})`,
-  });
+  const dispatchAdmissionClick = (btn: Element): void => {
+    const rect2 = (btn as HTMLElement).getBoundingClientRect();
+    const chromeOffsetY = Math.max(
+      0,
+      (win as typeof globalThis).outerHeight -
+        (win as typeof globalThis).innerHeight,
+    );
+    const screenX = Math.round(
+      ((win as typeof globalThis).screenX ?? 0) + rect2.left + rect2.width / 2,
+    );
+    const screenY = Math.round(
+      ((win as typeof globalThis).screenY ?? 0) +
+        chromeOffsetY +
+        rect2.top +
+        rect2.height / 2,
+    );
+    onEvent({ type: "trusted_click", x: screenX, y: screenY });
+    (btn as HTMLElement).click();
+    onEvent({
+      type: "diagnostic",
+      level: "info",
+      message: `meet-ext: clicked admission button aria-label="${btn.getAttribute("aria-label") ?? ""}" screen=(${screenX},${screenY})`,
+    });
+  };
+  dispatchAdmissionClick(admissionBtn);
+
+  // Step 4b — verify the click actually advanced the prejoin surface.
+  // Success is either the in-meeting indicator mounting or the admission
+  // button unmounting (a submitted knock removes it while "Asking to be
+  // let in" shows). Iteration-bounded rather than wall-clock, with a
+  // 500ms step, so the test harness's collapsed setTimeout (>=500ms fires
+  // immediately) keeps this instant while production waits ~6s.
+  const admissionAdvanced = async (iterations: number): Promise<boolean> => {
+    for (let i = 0; i < iterations; i++) {
+      if (doc.querySelector(selectors.INGAME_READY_INDICATOR)) return true;
+      if (
+        findInteractable(selectors.PREJOIN_JOIN_NOW_BUTTON) === null &&
+        findInteractable(selectors.PREJOIN_ASK_TO_JOIN_BUTTON) === null
+      ) {
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
+  };
+
+  if (!(await admissionAdvanced(12))) {
+    // The button is still sitting there interactable: the click did not
+    // register (QA observed exactly this via the page survey). Retry the
+    // trusted click once with freshly computed coordinates.
+    onEvent({
+      type: "diagnostic",
+      level: "info",
+      message:
+        "meet-ext: admission click did not advance the prejoin surface; retrying the trusted click once",
+    });
+    dispatchAdmissionClick(admissionBtn);
+    if (!(await admissionAdvanced(12))) {
+      const survey = surveyVisibleUi(doc);
+      // A sign-in heading alongside a click that will not take means the
+      // meeting requires authenticated participants; anonymous guests
+      // cannot knock on consumer-created meetings at all. Waiting the
+      // full 90s cannot succeed, so fail now with the actionable cause.
+      if (/headings=\[[^\]]*sign in/i.test(survey)) {
+        fail(
+          onEvent,
+          "meet-ext: the admission click is not advancing and Meet is offering Google sign-in. " +
+            "This meeting appears to require signed-in participants (consumer-created meetings do not allow anonymous guests to knock), " +
+            "and the bot joins anonymously. Use a meeting hosted by a Workspace account that allows guests to ask to join. " +
+            survey,
+        );
+      }
+      onEvent({
+        type: "diagnostic",
+        level: "error",
+        message: `meet-ext: admission click still not advancing after a retry; continuing to wait in case Meet is slow. ${survey}`,
+      });
+    }
+  }
 
   // Step 5 — wait for the in-meeting UI. `INGAME_READY_INDICATOR` matches
   // the chat / participants panel toggles (`"Chat with everyone"` /
