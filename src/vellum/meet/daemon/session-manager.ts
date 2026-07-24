@@ -895,11 +895,19 @@ class MeetSessionManagerImpl {
 
     // Pick the bot runner backend the `init` hook resolved. Docker present →
     // spawn a container per meeting (historical behavior); Docker absent →
-    // run the bot as a direct child process. Read lazily on each spawn so a
-    // late init decision (or a test override) is always honored.
+    // run the bot as a direct child process. The backend is read lazily on
+    // each call so a late init decision (or a test override) is honored,
+    // but the direct runner itself is a singleton: unlike the stateless
+    // Docker HTTP client, it tracks its children (and their log buffers)
+    // in memory, so a fresh instance per call means leave()/the exit
+    // watcher operate on an empty registry: no-op stop/remove and a
+    // 0-byte bot.log for exactly the crashes that need a post-mortem.
+    let directRunner: ReturnType<typeof createDirectBotRunner> | null = null;
     const botRunnerBuilder = () =>
       getMeetBotBackend() === "direct"
-        ? createDirectBotRunner(host.logger.get("meet-direct-bot-runner"))
+        ? (directRunner ??= createDirectBotRunner(
+            host.logger.get("meet-direct-bot-runner"),
+          ))
         : dockerRunnerSubModule(host, resolveWorkspaceDir);
     const audioIngestBuilder = audioIngestSubModule(host);
     const consentMonitorBuilder = consentMonitorSubModule(host);
