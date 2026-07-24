@@ -2140,6 +2140,16 @@ class MeetSessionManagerImpl {
     // `runner.remove()` so the exited container doesn't linger in
     // `docker ps -a` forever.
     const runner = this.deps.dockerRunnerFactory();
+    // Persist the bot's output BEFORE remove: a bot that dies mid-session
+    // (this path) is exactly the one whose log holds the crash cause, and
+    // for the direct runner `remove()` drops the in-memory log buffer, so
+    // capturing afterwards yields an empty bot.log.
+    await captureBotLogs(
+      runner,
+      containerId,
+      join(this.deps.resolveMeetingsRoot(), meetingId),
+      this.log,
+    );
     try {
       await runner.remove(containerId);
     } catch (err) {
