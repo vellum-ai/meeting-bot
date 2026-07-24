@@ -760,6 +760,19 @@ describe("MeetSessionManager container-exit watcher", () => {
       expect(runner.wait).toHaveBeenCalledTimes(1);
       expect(runner.wait.mock.calls[0]![0]).toBe("container-123");
 
+      // Track the logs/remove ordering: the crash post-mortem must be
+      // captured BEFORE remove, because the direct runner's remove()
+      // drops the in-memory log buffer (a capture afterwards writes an
+      // empty bot.log; exactly the mid-session-death gap QA hit).
+      const order: string[] = [];
+      runner.logs.mockImplementation(async () => {
+        order.push("logs");
+        return "boom";
+      });
+      runner.remove.mockImplementation(async () => {
+        order.push("remove");
+      });
+
       // Pretend some external process (stray daemon reaper, user
       // `docker kill`, OOM reaper, etc.) terminated the bot container
       // with exit code 137 (SIGKILL). The `leaveInitiatedByDaemon` flag
@@ -795,6 +808,11 @@ describe("MeetSessionManager container-exit watcher", () => {
       // linger in `docker ps -a`.
       expect(runner.stop).toHaveBeenCalledTimes(0);
       expect(runner.remove).toHaveBeenCalledTimes(1);
+
+      // The crash log was captured, and before the container record was
+      // removed.
+      expect(runner.logs).toHaveBeenCalledWith("container-123");
+      expect(order).toEqual(["logs", "remove"]);
       // The bot is already dead — skipping the bot HTTP `/leave` avoids
       // burning 10s on an `ECONNREFUSED` timeout before teardown can
       // start.
