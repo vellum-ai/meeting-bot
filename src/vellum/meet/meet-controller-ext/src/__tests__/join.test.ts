@@ -927,6 +927,30 @@ describe("runJoinFlow (content-script port)", () => {
     expect(diag).toBeDefined();
   });
 
+  test("fails fast with a sign-in hint when Meet offers sign-in and the click does not advance", async () => {
+    const { doc } = loadPrejoinDom();
+    removeMediaModal(doc);
+    // The admission button stays mounted (the click never advances) and
+    // the page carries the sign-in heading QA observed via the survey:
+    // the flow must fail fast with the actionable cause instead of
+    // burning the full 90s wait.
+    const heading = doc.createElement("h1");
+    heading.textContent = "Sign in with your Google account";
+    doc.body.appendChild(heading);
+
+    const events: unknown[] = [];
+    await expect(
+      runJoinFlow({
+        meetingUrl: "https://meet.google.com/abc-defg-hij",
+        displayName: "Vellum Bot",
+        consentMessage: "Hi, Vellum is listening.",
+        meetingId: "mtg-signin",
+        onEvent: (e) => events.push(e),
+        doc,
+      }),
+    ).rejects.toThrow(/signed-in participants/i);
+  });
+
   test("fires onAdmitted after admission but before consent post", async () => {
     const { doc } = loadPrejoinDom();
     removeMediaModal(doc);
