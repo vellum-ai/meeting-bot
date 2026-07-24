@@ -79,6 +79,7 @@ import { setMeetHost } from "./meet/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
 import { augmentProcessEnv } from "../path-env.ts";
 import { ensureBrowserStack } from "./browser-stack.ts";
+import { ensureRelocatedCompatLinks } from "./relocated-compat.ts";
 import { startMeetIngress } from "./ingress.ts";
 import { createJoinStatusTracker } from "./join-status.ts";
 import { createWorkerSttRelay } from "./stt-relay.ts";
@@ -202,6 +203,23 @@ async function main(): Promise<void> {
     envAdditions.pulseModuleDir
   ) {
     log.info("augmented spawn environment for relocated system tools", envAdditions);
+  }
+
+  // Bridge compile-time absolute paths that env augmentation cannot reach
+  // (Xvfb's hardcoded /usr/bin/xkbcomp and XKB data dir, chromium's
+  // /etc/chromium.d). Best-effort: on a read-only root the failure is
+  // logged so a keymap-compile crash is attributable, not mysterious.
+  const compat = ensureRelocatedCompatLinks();
+  if (compat.created.length > 0) {
+    log.info("created relocated-root compat symlinks", {
+      created: compat.created,
+    });
+  }
+  for (const failure of compat.failed) {
+    log.warn(
+      "could not create relocated-root compat symlink; the relocated tool that needs this path will fail",
+      failure,
+    );
   }
 
   // Bot backend probe, mirroring meet-join's init hook: a Docker container
