@@ -128,6 +128,31 @@ export type ExtensionDiagnosticMessage = z.infer<
 >;
 
 /**
+ * Emitted by the extension's background service worker when a tab that was
+ * on `meet.google.com` navigates somewhere else. The content script cannot
+ * report this itself — it dies with the page — so the background watches
+ * `chrome.tabs.onUpdated` and reports on its behalf.
+ *
+ * This is the signal that turns a blind join timeout into a diagnosis:
+ * Meet bounces rejected clients to the marketing landing page
+ * (`workspace.google.com/products/meet/`), and without this message the
+ * bot only learns "never reached joined" 120s later. The bot treats an
+ * off-meet navigation as terminal for the session.
+ */
+export const ExtensionPageNavigatedMessageSchema = z.object({
+  type: z.literal("page_navigated"),
+  /** URL the tab landed on after leaving Meet. */
+  url: z.string().min(1),
+  /** Meet URL the tab was on before the navigation (source-tab gate key). */
+  fromUrl: z.string().min(1),
+  /** ISO-8601 timestamp of when the navigation was observed. */
+  timestamp: z.string().min(1),
+});
+export type ExtensionPageNavigatedMessage = z.infer<
+  typeof ExtensionPageNavigatedMessageSchema
+>;
+
+/**
  * Ask the bot to dispatch a REAL X-server mouse click at the given screen
  * coordinates (via xdotool inside the bot container). Google Meet gates
  * several critical buttons (the prejoin admission button in particular)
@@ -472,6 +497,7 @@ export const ExtensionToBotMessageSchema = z.discriminatedUnion("type", [
   ExtensionSpeakerChangeMessageSchema,
   ExtensionInboundChatMessageSchema,
   ExtensionDiagnosticMessageSchema,
+  ExtensionPageNavigatedMessageSchema,
   ExtensionTrustedClickMessageSchema,
   ExtensionTrustedTypeMessageSchema,
   ExtensionSendChatResultMessageSchema,
@@ -489,6 +515,7 @@ export const EXTENSION_TO_BOT_MESSAGE_TYPES = [
   "speaker.change",
   "chat.inbound",
   "diagnostic",
+  "page_navigated",
   "trusted_click",
   "trusted_type",
   "send_chat_result",

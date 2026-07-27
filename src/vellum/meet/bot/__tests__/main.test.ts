@@ -1497,6 +1497,67 @@ describe("runBot — Gap B: extension-joined deadline", () => {
     expect(handles.daemonStopped()).toBe(true);
   });
 
+  test("page_navigated off Meet triggers shutdown with exit code 1 and the URL in detail", async () => {
+    BotState.__resetForTests();
+    const { deps, handles } = makeDeps();
+    const running = runBot(deps);
+    await new Promise((r) => setTimeout(r, 5));
+    handles.fireExtensionReady();
+    await running;
+
+    // The background SW reports the meeting tab bouncing to the Meet
+    // marketing page (observed when Meet rejects the client's knock).
+    handles.fireExtensionMessage({
+      type: "page_navigated",
+      url: "https://workspace.google.com/products/meet/",
+      fromUrl: "https://meet.google.com/abc-defg-hij",
+      timestamp: new Date().toISOString(),
+    });
+
+    const deadline = Date.now() + 1_000;
+    while (handles.exitCode() === null && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    expect(handles.exitCode()).toBe(1);
+    const errEvents = handles.daemonEvents
+      .filter((e): e is LifecycleEvent => e.type === "lifecycle")
+      .filter((e) => e.state === "error");
+    expect(errEvents.length).toBe(1);
+    expect(errEvents[0]?.detail).toContain(
+      "https://workspace.google.com/products/meet/",
+    );
+
+    const counts = handles.stopCounts();
+    expect(counts.httpServer).toBe(1);
+    expect(counts.chrome).toBe(1);
+    expect(handles.daemonStopped()).toBe(true);
+  });
+
+  test("page_navigated from a foreign Meet tab is ignored", async () => {
+    BotState.__resetForTests();
+    const { deps, handles } = makeDeps();
+    const running = runBot(deps);
+    await new Promise((r) => setTimeout(r, 5));
+    handles.fireExtensionReady();
+    await running;
+
+    handles.fireExtensionMessage({
+      type: "page_navigated",
+      url: "https://workspace.google.com/products/meet/",
+      fromUrl: "https://meet.google.com/zzz-zzzz-zzz",
+      timestamp: new Date().toISOString(),
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(handles.exitCode()).toBeNull();
+    const counts = handles.stopCounts();
+    expect(counts.httpServer).toBe(0);
+    expect(counts.chrome).toBe(0);
+    expect(handles.daemonStopped()).toBe(false);
+  });
+
   test("lifecycle:left from extension triggers shutdown with exit code 0", async () => {
     BotState.__resetForTests();
     const { deps, handles } = makeDeps({ extensionJoinedTimeoutMs: 50 });

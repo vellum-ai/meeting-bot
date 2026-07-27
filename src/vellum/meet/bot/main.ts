@@ -596,6 +596,12 @@ export async function runBot(deps: BotDeps): Promise<void> {
   // block comment on `enqueueXdotool` for why the queue exists.
   let xdotoolQueue: Promise<unknown> = Promise.resolve();
 
+  // Wall-clock of the last successfully dispatched trusted click. Lets a
+  // subsequent `page_navigated` report say how long after the admission
+  // click Meet bounced the tab — the difference between "knock rejected
+  // instantly" and "knock sat unanswered until it expired".
+  let lastTrustedClickAt: number | null = null;
+
   // Timer armed after `join` is dispatched that trips shutdown if the
   // extension never reaches `lifecycle:joined` / `lifecycle:error`. Cleared
   // from the lifecycle-message handler and on shutdown. See the timer
@@ -1223,6 +1229,38 @@ export async function runBot(deps: BotDeps): Promise<void> {
         if (msg.level === "error") deps.logError(`[ext] ${msg.message}`);
         else deps.logInfo(`[ext] ${msg.message}`);
         return;
+      case "page_navigated": {
+        // Source-tab gate: `page_navigated` carries no meetingId, but its
+        // `fromUrl` is the Meet URL the tab was on — derive the code from
+        // that. A stray Meet tab in the profile navigating away must not
+        // kill the real session.
+        if (!isFromOurTab(extractMeetingCodeFromUrl(msg.fromUrl) ?? "")) {
+          deps.logInfo(
+            `meet-bot: dropping page_navigated from foreign tab (fromUrl=${msg.fromUrl}, expected=${expectedMeetingCode ?? "<none>"})`,
+          );
+          return;
+        }
+        if (shutdownInProgress) return;
+        // The meeting tab left meet.google.com — the session is dead
+        // whatever phase we were in. During the join flow this is Meet
+        // bouncing the client (rejected knock / invalidated session);
+        // after joining it means the tab was navigated off the meeting.
+        // Either way, failing now with the destination URL beats sitting
+        // blind until the join deadline or the audio pipeline starves.
+        const sinceClick =
+          lastTrustedClickAt === null
+            ? ""
+            : ` ${Date.now() - lastTrustedClickAt}ms after the last trusted click`;
+        const detail = `meeting tab navigated off Meet to ${msg.url}${sinceClick} — Meet bounced this client out of the ${BotState.snapshot().phase === "joined" ? "meeting" : "join flow"}`;
+        deps.logError(`meet-bot: ${detail}`);
+        clearExtensionJoinedTimer();
+        void shutdown("error", detail).then(() => {
+          detachSigterm();
+          detachSigint();
+          deps.exit(1);
+        });
+        return;
+      }
       case "trusted_click": {
         // Serialized through `xdotoolQueue`: a click issued while a
         // prior `trusted_type` is still in flight would shift focus
@@ -1238,11 +1276,12 @@ export async function runBot(deps: BotDeps): Promise<void> {
               y: msg.y,
               display: env.xvfbDisplay,
             })
-            .then(() =>
+            .then(() => {
+              lastTrustedClickAt = Date.now();
               deps.logInfo(
                 `meet-bot: trusted_click dispatched at (${msg.x},${msg.y})`,
-              ),
-            )
+              );
+            })
             .catch((err: unknown) => {
               const detail = err instanceof Error ? err.message : String(err);
               deps.logError(`meet-bot: trusted_click failed: ${detail}`);
