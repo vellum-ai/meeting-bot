@@ -956,6 +956,42 @@ describe("runJoinFlow (content-script port)", () => {
     expect(diag).toBeDefined();
   });
 
+  test("emits periodic page surveys while waiting out the post-knock window", async () => {
+    const { doc } = loadPrejoinDom();
+    removeMediaModal(doc);
+    // Indicator never mounts: step 5 walks all its chunks. Each chunk
+    // boundary must emit a "still waiting" survey so a silently-discarded
+    // knock leaves a client-side record of what the page showed.
+    const events: unknown[] = [];
+    await expect(
+      runJoinFlow({
+        meetingUrl: "https://meet.google.com/abc-defg-hij",
+        displayName: "Vellum Bot",
+        consentMessage: "Hi, Vellum is listening.",
+        meetingId: "mtg-surveys",
+        onEvent: unmountAdmissionButtonsOnClick(doc, (e) => events.push(e)),
+        doc,
+      }),
+    ).rejects.toThrow(/in-meeting UI did not appear/i);
+
+    const surveys = events.filter(
+      (e) =>
+        typeof e === "object" &&
+        e !== null &&
+        (e as { type?: string }).type === "diagnostic" &&
+        (e as { level?: string }).level === "info" &&
+        typeof (e as { message?: string }).message === "string" &&
+        (e as { message: string }).message.includes(
+          "still waiting for admission",
+        ),
+    );
+    expect(surveys.length).toBeGreaterThan(0);
+    // Each survey carries the page ground truth.
+    expect(
+      (surveys[0] as { message: string }).message.includes("page-survey"),
+    ).toBe(true);
+  });
+
   test("fails fast with a sign-in hint when Meet offers sign-in and the click does not advance", async () => {
     const { doc } = loadPrejoinDom();
     removeMediaModal(doc);

@@ -354,6 +354,13 @@ export interface BotDeps {
   extensionJoinedTimeoutMs: number;
   /** Milliseconds before a `send_chat` request times out with a failure. */
   sendChatTimeoutMs: number;
+  /**
+   * Delay between an admission-phase trusted click and the knock-evidence
+   * screenshot (`knock.png` in the diag dir). Long enough for Meet to
+   * render the post-click state ("Asking to be let in", an error, ...),
+   * short enough to land well before the ~60s knock-expiry bounce.
+   */
+  knockScreenshotDelayMs: number;
   /** Grace period after sending `leave` for the extension to animate out. */
   leaveGraceMs: number;
   /** Factory for correlation ids on outbound `send_chat` commands. */
@@ -416,6 +423,7 @@ export function defaultDeps(): BotDeps {
     extensionReadyTimeoutMs: 30_000,
     extensionJoinedTimeoutMs: 120_000,
     sendChatTimeoutMs: 10_000,
+    knockScreenshotDelayMs: 5_000,
     leaveGraceMs: 2_000,
     generateRequestId: () => randomUUID(),
   };
@@ -1281,6 +1289,29 @@ export async function runBot(deps: BotDeps): Promise<void> {
               deps.logInfo(
                 `meet-bot: trusted_click dispatched at (${msg.x},${msg.y})`,
               );
+              // Knock evidence: pre-admission clicks are admission clicks,
+              // so shortly after one lands, grab a frame of what Meet
+              // rendered in response. When a knock is silently discarded
+              // server-side, this is the only picture of the client-side
+              // "asking" state — the failure.png teardown capture fires
+              // post-bounce and shows only where the tab ended up.
+              if (
+                env.diagDir !== null &&
+                BotState.snapshot().phase !== "joined"
+              ) {
+                const knockPath = join(env.diagDir, "knock.png");
+                setTimeout(() => {
+                  void deps
+                    .captureScreenshot(env.xvfbDisplay, knockPath)
+                    .then((ok) => {
+                      if (ok) {
+                        deps.logInfo(
+                          `meet-bot: knock screenshot captured to ${knockPath}`,
+                        );
+                      }
+                    });
+                }, deps.knockScreenshotDelayMs);
+              }
             })
             .catch((err: unknown) => {
               const detail = err instanceof Error ? err.message : String(err);

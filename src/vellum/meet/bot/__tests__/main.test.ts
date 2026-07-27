@@ -112,6 +112,8 @@ interface MakeDepsOpts {
    * override this to a small value.
    */
   extensionJoinedTimeoutMs?: number;
+  /** Diagnostics dir for the env; enables the knock-screenshot path. */
+  diagDir?: string;
 }
 
 function makeDeps(opts: MakeDepsOpts = {}): {
@@ -153,7 +155,7 @@ function makeDeps(opts: MakeDepsOpts = {}): {
   });
 
   const defaultEnv = {
-    diagDir: null as string | null,
+    diagDir: (opts.diagDir ?? null) as string | null,
     meetUrl: "https://meet.google.com/abc-defg-hij",
     meetingId: "m-1",
     joinName: "Vellum Bot",
@@ -198,7 +200,10 @@ function makeDeps(opts: MakeDepsOpts = {}): {
     },
     displayConnectable: async () => true,
     registerNmhManifest: async () => {},
-    captureScreenshot: async () => false,
+    captureScreenshot: async (display, outPath) => {
+      calls.push({ kind: "screenshot.capture", display, outPath });
+      return true;
+    },
     startXvfb: async (display) => {
       calls.push({ kind: "xvfb.start", display });
       if (opts.xvfbError) throw opts.xvfbError;
@@ -370,6 +375,7 @@ function makeDeps(opts: MakeDepsOpts = {}): {
     extensionReadyTimeoutMs: 1_000,
     extensionJoinedTimeoutMs: opts.extensionJoinedTimeoutMs ?? 60_000,
     sendChatTimeoutMs: 500,
+    knockScreenshotDelayMs: 1,
     leaveGraceMs: 0,
     generateRequestId: () => {
       requestIdCounter += 1;
@@ -649,6 +655,45 @@ describe("runBot — extension message routing", () => {
     const counts = handles.stopCounts();
     expect(counts.chrome).toBe(0);
     expect(counts.xvfb).toBe(0);
+  });
+
+  test("admission-phase trusted_click captures a knock screenshot into the diag dir", async () => {
+    BotState.__resetForTests();
+    const { deps, handles } = makeDeps({ diagDir: "/data/meets/m-1/out" });
+    await bootHappyPath(deps, handles);
+
+    // Phase is still `joining` — this is the admission click.
+    handles.fireExtensionMessage({ type: "trusted_click", x: 1014, y: 536 });
+    // knockScreenshotDelayMs is 1 in tests; give the timer room to fire.
+    await new Promise((r) => setTimeout(r, 30));
+
+    const shot = handles.calls.find((c) => c.kind === "screenshot.capture");
+    expect(shot).toBeDefined();
+    expect(shot!.outPath).toBe("/data/meets/m-1/out/knock.png");
+    expect(shot!.display).toBe(":99");
+    expect(
+      handles.infos.some((m) => m.includes("knock screenshot captured")),
+    ).toBe(true);
+  });
+
+  test("trusted_click after joining does not capture a knock screenshot", async () => {
+    BotState.__resetForTests();
+    const { deps, handles } = makeDeps({ diagDir: "/data/meets/m-1/out" });
+    await bootHappyPath(deps, handles);
+
+    handles.fireExtensionMessage({
+      type: "lifecycle",
+      meetingId: "abc-defg-hij",
+      timestamp: new Date().toISOString(),
+      state: "joined",
+    });
+    // In-meeting clicks (chat send button, etc.) are not knocks.
+    handles.fireExtensionMessage({ type: "trusted_click", x: 5, y: 10 });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(
+      handles.calls.find((c) => c.kind === "screenshot.capture"),
+    ).toBeUndefined();
   });
 
   test("trusted_type invokes xdotoolType with the payload + configured display", async () => {
