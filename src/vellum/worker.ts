@@ -86,10 +86,14 @@ import { createWorkerSttRelay } from "./stt-relay.ts";
 import { createWorkerHost, type SendToParent } from "./worker-host.ts";
 
 import type { MeetingBotConfig } from "../config.ts";
+import { vellumJoinRejection } from "../meeting-platform.ts";
 
-/** Google Meet URL shape (mirrors meet-join's `meet_join` tool validation). */
-export const MEET_URL_REGEX =
-  /^https:\/\/meet\.google\.com\/[a-z]{3,4}-?[a-z]{4}-?[a-z]{3,4}(?:\?.*)?$/i;
+/**
+ * Google Meet URL shape (mirrors meet-join's `meet_join` tool validation).
+ * Re-exported from the platform module, which now owns URL shapes for every
+ * platform the plugin recognizes — see `../meeting-platform.ts`.
+ */
+export { MEET_URL_REGEX } from "../meeting-platform.ts";
 
 /** Spawn argument the supervisor passes as base64 JSON in argv[2]. */
 export interface VellumWorkerArgs {
@@ -305,11 +309,12 @@ async function main(): Promise<void> {
       if (path === "/join") {
         const meetingUrl =
           typeof body.meetingUrl === "string" ? body.meetingUrl.trim() : "";
-        if (!MEET_URL_REGEX.test(meetingUrl)) {
-          return jsonResponse(
-            { error: "meetingUrl must be a Google Meet link (https://meet.google.com/xxx-yyyy-zzz)" },
-            400,
-          );
+        // Platform-aware refusal: a Zoom/Teams link is a real meeting link
+        // the `recall` provider can join, so say that instead of claiming
+        // the URL is malformed. See `../meeting-platform.ts`.
+        const rejection = vellumJoinRejection(meetingUrl);
+        if (rejection !== null) {
+          return jsonResponse({ error: rejection }, 400);
         }
         const conversationId =
           typeof body.conversationId === "string" && body.conversationId.length > 0

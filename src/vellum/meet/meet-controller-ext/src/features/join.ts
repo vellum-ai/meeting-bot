@@ -178,6 +178,38 @@ function surveyVisibleUi(doc: Document): string {
 }
 
 /**
+ * Headings Meet renders on its hard-denial page. QA (2026-07) captured
+ * this immediately after a knock: "You can't join this video call", with
+ * a 60s "Returning to home screen" countdown that then redirects the tab
+ * to the marketing site. It is the same string the Phase 1.11 work saw
+ * when BotGuard rejected CDP-attached clients (see `bot/README.md`), so
+ * it means "this client was refused", NOT "the host hasn't answered".
+ *
+ * Matching is substring-based and lowercase because Meet localizes and
+ * occasionally re-words these pages.
+ */
+const DENIAL_HEADING_FRAGMENTS = [
+  "you can't join this video call",
+  "you can’t join this video call",
+] as const;
+
+/**
+ * Return the denial heading Meet is currently showing, or null. Checked
+ * during the post-knock wait so a refusal fails the join immediately
+ * instead of burning the full admission budget on a dead page.
+ */
+function detectJoinDenial(doc: Document): string | null {
+  for (const el of Array.from(doc.querySelectorAll('h1, h2, [role="heading"]'))) {
+    const text = (el.textContent ?? "").trim();
+    const haystack = text.toLowerCase();
+    if (DENIAL_HEADING_FRAGMENTS.some((f) => haystack.includes(f))) {
+      return text;
+    }
+  }
+  return null;
+}
+
+/**
  * Drive the Meet prejoin surface to completion and post the consent notice.
  *
  * Resolves once the in-meeting UI has mounted and the consent-message post
@@ -496,6 +528,18 @@ export async function runJoinFlow(opts: RunJoinFlowOptions): Promise<void> {
       );
       inMeeting = true;
     } catch {
+      // Hard denial short-circuit: Meet refused this client outright, and
+      // its own page is counting down to a redirect. Waiting out the rest
+      // of the budget only delays an answer we already have.
+      const denial = detectJoinDenial(doc);
+      if (denial !== null) {
+        fail(
+          onEvent,
+          `meet-ext: Meet refused this client — "${denial}". This is a rejection of the ` +
+            `joining client, not a pending admission: no admit prompt reaches the host, ` +
+            `and Meet redirects away shortly after. ${surveyVisibleUi(doc)}`,
+        );
+      }
       if (chunk < chunks) {
         onEvent({
           type: "diagnostic",
