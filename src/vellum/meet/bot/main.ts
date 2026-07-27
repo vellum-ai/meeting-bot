@@ -78,6 +78,12 @@ import {
 } from "./browser/xvfb.js";
 import { captureDisplayScreenshot } from "./browser/screenshot.js";
 import { resolveProfileDir } from "./browser/profile-dir.js";
+import { buildStartUrl } from "./browser/chrome-launcher.js";
+import {
+  googleAccountMissingMessage,
+  hasGoogleAccountEnv,
+  readGoogleAccountEnv,
+} from "../../google-account-env.js";
 import { ensureNmhManifestRegistered } from "./native-messaging/register-manifest.js";
 import { DaemonClient } from "./control/daemon-client.js";
 import {
@@ -925,7 +931,10 @@ export async function runBot(deps: BotDeps): Promise<void> {
     }
 
     subsystems.chrome = await deps.launchChrome({
-      meetingUrl: meetUrl,
+      // Sign-in first when an account is configured; Google's `continue`
+      // parameter carries the browser through to the meeting. See
+      // `browser/chrome-launcher.ts`.
+      meetingUrl: buildStartUrl(meetUrl, hasGoogleAccountEnv(process.env)),
       displayNumber: env.xvfbDisplay,
       extensionPath: env.extensionPath,
       userDataDir,
@@ -1257,6 +1266,35 @@ export async function runBot(deps: BotDeps): Promise<void> {
         if (msg.level === "error") deps.logError(`[ext] ${msg.message}`);
         else deps.logInfo(`[ext] ${msg.message}`);
         return;
+      case "sign_in_required": {
+        // The extension is sitting on Google's sign-in page. Hand it the
+        // account — this is the only point at which the credentials cross
+        // into the browser, and only in response to the extension asking.
+        const account = readGoogleAccountEnv(process.env);
+        if (account === null) {
+          const detail = googleAccountMissingMessage();
+          deps.logError(`meet-bot: ${detail}`);
+          void shutdown("error", detail).then(() => {
+            detachSigterm();
+            detachSigint();
+            deps.exit(1);
+          });
+          return;
+        }
+        deps.logInfo(
+          "meet-bot: extension requested sign-in; sending the bot account",
+        );
+        try {
+          subsystems.socketServer?.sendToExtension({
+            type: "sign_in",
+            email: account.email,
+            password: account.password,
+          });
+        } catch (err) {
+          deps.logError(`meet-bot: failed to send sign_in: ${errMsg(err)}`);
+        }
+        return;
+      }
       case "page_navigated": {
         // Source-tab gate: `page_navigated` carries no meetingId, but its
         // `fromUrl` is the Meet URL the tab was on — derive the code from

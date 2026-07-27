@@ -37,6 +37,7 @@ import { basename, dirname, join } from "node:path";
 import type { InitContext } from "@vellumai/plugin-api";
 
 import type { MeetingBotConfig } from "../config.ts";
+import { resolveGoogleCredentials } from "../google-credentials.ts";
 import { resolveAssistantName } from "../identity.ts";
 import { upsertHistoryEntry } from "../meeting-history.ts";
 import { augmentedSpawnEnv } from "../path-env.ts";
@@ -359,6 +360,29 @@ export async function initVellumRuntime(
   // free before the replacement binds).
   await reapStaleWorker(vellumPidFilePath(), VELLUM_WORKER_CMDLINE_MARKER, ctx.logger);
 
+  // Resolve the bot's Google account daemon-side: `resolveCredential` only
+  // works in the process the plugin's hooks run in, not in the worker. The
+  // values ride the worker's ENVIRONMENT (never argv, which `ps` exposes)
+  // and the worker forwards them to each bot it spawns.
+  //
+  // Absence is not fatal here — the runtime still starts and serves status;
+  // the /join path is what refuses, with an actionable message. Credentials
+  // are read once per runtime start, so a rotation takes effect on the next
+  // provider restart (which the credential write triggers).
+  let googleEnv: Record<string, string> = {};
+  try {
+    const creds = await resolveGoogleCredentials();
+    googleEnv = {
+      GOOGLE_ACCOUNT_EMAIL: creds.email,
+      GOOGLE_ACCOUNT_PASSWORD: creds.password,
+    };
+  } catch {
+    ctx.logger.info(
+      {},
+      "meeting-bot: no Google bot account stored; vellum joins will refuse until one is set",
+    );
+  }
+
   return new Promise<void>((resolve, reject) => {
     const args = {
       config,
@@ -377,7 +401,7 @@ export async function initVellumRuntime(
       // relocated apt root's shared libraries; hand the worker a fully
       // augmented env so its binary probes, the dynamic loader, and every
       // bot it spawns can find the browser stack (see src/path-env.ts).
-      env: augmentedSpawnEnv(),
+      env: { ...augmentedSpawnEnv(), ...googleEnv },
     });
 
     const state: RunningRuntime = {

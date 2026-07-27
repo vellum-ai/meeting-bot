@@ -48,7 +48,14 @@ The join flow fails fast on this string (`detectJoinDenial` in `../meet-controll
 - The **Meet Media API** is Google's first-class real-time media path, but it is Developer Preview and requires *every participant* to be enrolled in the preview program — unusable for joining arbitrary customer meetings.
 - **Bots on Demand** exists for automated participants but is allowlist-only and aimed at performance testing.
 
-If anonymous joins must work, the remaining lever is a signed-in bot account (Option A), not further flag tuning.
+**Current approach — a signed-in bot account.** The vellum provider now requires a dedicated Google account:
+
+- Credentials live ONLY in the credential store (`meeting-bot/google_email`, `meeting-bot/google_password`). Nothing — not the values, not a credential id or path — is written to `config.json`. Set them from the dashboard or with `assistant credentials set`.
+- The daemon resolves them once per runtime start and injects them into the worker's **environment** (never argv, which `ps` exposes); the worker forwards them into each bot's environment. See `src/vellum/google-account-env.ts`.
+- Chrome opens `accounts.google.com/ServiceLogin?continue=<meetUrl>`, so an already-signed-in persistent profile redirects straight to the meeting and a cold one lands on the login form. The extension's `features/sign-in.ts` drives that form with the same trusted-input machinery the join flow uses, then Google's `continue` carries the browser to the meeting.
+- The persistent Chrome profile (`browser/profile-dir.ts`) is what makes this cheap after the first join: the session survives, so most joins skip the form entirely.
+
+2FA, "verify it's you" device challenges, and "couldn't sign you in" are detected and reported as actionable errors rather than retried — they need account configuration (disable 2-Step Verification on the bot account, or warm the profile by signing in once by hand), not more automation.
 
 ## Testing
 

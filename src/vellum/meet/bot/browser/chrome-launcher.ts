@@ -238,6 +238,28 @@ function relocatedChromeBinary(): string | null {
  * dir), then the container's `/usr/bin/chromium` as the last resort so the
  * Docker image needs no PATH assumptions.
  */
+/**
+ * Build the URL Chrome opens with.
+ *
+ * When the bot has a Google account, it opens Google's sign-in page with
+ * `continue=<meetingUrl>` instead of the meeting directly. Google then
+ * does the navigation itself: an already-signed-in persistent profile
+ * redirects straight through to the meeting, and a fresh one lands on the
+ * login form, which the extension drives before the same redirect fires.
+ * Either way there is exactly one navigation and no polling.
+ *
+ * Without an account we open the meeting directly, preserving the old
+ * (anonymous) behavior — the join then fails at Meet's denial page with
+ * the message that names the missing account.
+ */
+export function buildStartUrl(
+  meetingUrl: string,
+  hasGoogleAccount: boolean,
+): string {
+  if (!hasGoogleAccount) return meetingUrl;
+  return `https://accounts.google.com/ServiceLogin?continue=${encodeURIComponent(meetingUrl)}`;
+}
+
 export function defaultChromeBinary(): string {
   const fromEnv = process.env.CHROME_BINARY?.trim();
   if (fromEnv) return fromEnv;

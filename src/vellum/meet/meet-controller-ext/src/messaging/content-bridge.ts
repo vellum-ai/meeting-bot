@@ -26,6 +26,18 @@ import type { NativePort } from "./native-port.js";
 /** URL pattern used to locate Meet tabs when fanning out bot commands. */
 export const MEET_TAB_URL_PATTERN = "https://meet.google.com/*";
 
+/**
+ * Sign-in tabs. `sign_in` is the one command whose target is NOT a Meet
+ * tab — the bot authenticates on `accounts.google.com` before the meeting
+ * will admit it (see `features/sign-in.ts`).
+ */
+export const SIGN_IN_TAB_URL_PATTERN = "https://accounts.google.com/*";
+
+/** Which tab pattern a given bot command should be delivered to. */
+function tabPatternFor(type: BotToExtensionMessage["type"]): string {
+  return type === "sign_in" ? SIGN_IN_TAB_URL_PATTERN : MEET_TAB_URL_PATTERN;
+}
+
 /** Wire up the content-script ↔ native-port router for the life of the SW. */
 export function startContentBridge(port: NativePort): void {
   // Content scripts post messages up to the service worker via
@@ -166,7 +178,7 @@ async function fanOutToMeetTabs(msg: BotToExtensionMessage): Promise<void> {
     }
     let tabs: chrome.tabs.Tab[];
     try {
-      tabs = await chrome.tabs.query({ url: MEET_TAB_URL_PATTERN });
+      tabs = await chrome.tabs.query({ url: tabPatternFor(msg.type) });
     } catch (err) {
       console.warn("[meet-ext] tabs.query failed:", err);
       return;
@@ -174,7 +186,7 @@ async function fanOutToMeetTabs(msg: BotToExtensionMessage): Promise<void> {
     if (tabs.length === 0) {
       if (attempt === DELIVERY_RETRY_DELAYS_MS.length) {
         console.warn(
-          `[meet-ext] no Meet tab open after ${attempt} retries; dropping bot->content message type=${msg.type}`,
+          `[meet-ext] no ${tabPatternFor(msg.type)} tab open after ${attempt} retries; dropping bot->content message type=${msg.type}`,
         );
         return;
       }

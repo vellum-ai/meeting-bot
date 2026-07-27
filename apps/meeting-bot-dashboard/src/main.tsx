@@ -239,6 +239,141 @@ function StatusCell({ meeting }: { meeting: Meeting }) {
 /** Per-field save state: which field is in flight, and the last outcome. */
 type FieldState = "idle" | "saving" | "saved" | "error";
 
+/** Presence-only view of the bot's Google account. Never carries values. */
+interface GoogleCredentialsStatus {
+  email: boolean;
+  password: boolean;
+  complete: boolean;
+}
+
+/**
+ * Google bot-account form, shown only for the vellum provider.
+ *
+ * Google refuses anonymous automated clients, so the vellum bot signs in
+ * as a dedicated account the operator provisions. The values go straight
+ * to the credential store via their own route — never through the
+ * settings PATCH, which writes `config.json`.
+ *
+ * The server only ever reports whether each field is set, so the inputs
+ * start empty on every load: there is nothing to prefill and nothing to
+ * leak. Submitting one field leaves the other untouched.
+ */
+function GoogleAccount() {
+  const [status, setStatus] = useState<GoogleCredentialsStatus | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [state, setState] = useState<FieldState>("idle");
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await vfetch(`${BASE}/google-credentials`);
+        if (res.ok) setStatus(await res.json());
+      } catch {
+        // Leave the summary blank; the form still works.
+      }
+    })();
+  }, []);
+
+  async function save() {
+    const body: { email?: string; password?: string } = {};
+    if (email.trim()) body.email = email.trim();
+    if (password) body.password = password;
+    if (Object.keys(body).length === 0) return;
+
+    setState("saving");
+    setNote("");
+    try {
+      const res = await vfetch(`${BASE}/google-credentials`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await res.json();
+      if (res.ok) {
+        setStatus(payload);
+        setState("saved");
+        setNote(payload.note || "");
+        // Clear the inputs: the stored values are never read back, so
+        // leaving a password sitting in the DOM buys nothing.
+        setEmail("");
+        setPassword("");
+        setTimeout(() => setState("idle"), 2500);
+      } else {
+        setState("error");
+        setNote(payload.error || "Could not store the credentials.");
+      }
+    } catch {
+      setState("error");
+      setNote("Could not reach the plugin.");
+    }
+  }
+
+  const summary =
+    status === null
+      ? "Checking..."
+      : status.complete
+        ? "Configured"
+        : status.email
+          ? "Password missing"
+          : status.password
+            ? "Email missing"
+            : "Not configured";
+
+  return (
+    <>
+      <div className="row">
+        <label htmlFor="google-email">Bot Google account</label>
+        {state === "idle" ? null : (
+          <span className={`field-status field-${state}`}>
+            {state === "saving"
+              ? "Saving..."
+              : state === "saved"
+                ? "Saved"
+                : "Failed"}
+          </span>
+        )}
+        <input
+          id="google-email"
+          type="email"
+          placeholder={status?.email ? "email stored — replace" : "bot@example.com"}
+          value={email}
+          disabled={state === "saving"}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
+      <div className="row">
+        <label htmlFor="google-password">Password</label>
+        <input
+          id="google-password"
+          type="password"
+          placeholder={status?.password ? "password stored — replace" : "password"}
+          value={password}
+          disabled={state === "saving"}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
+      <div className="row">
+        <label />
+        <button
+          type="button"
+          disabled={state === "saving" || (!email.trim() && !password)}
+          onClick={() => void save()}
+        >
+          Save account
+        </button>
+      </div>
+      <div className="row provider-note">
+        {summary}. Stored in the credential store, never in config.json.
+        Google denies anonymous bots, so the vellum provider needs this to
+        join. Saving restarts the provider runtime.
+        {note ? ` ${note}` : ""}
+      </div>
+    </>
+  );
+}
+
 function Configuration({
   config,
   setConfig,
@@ -380,6 +515,7 @@ function Configuration({
             {providerNote ? (
               <div className="row provider-note">{providerNote}</div>
             ) : null}
+            {config.provider === "vellum" ? <GoogleAccount /> : null}
             <div className="row">
               <label htmlFor="region">Region</label>
               {fieldBadge("region")}

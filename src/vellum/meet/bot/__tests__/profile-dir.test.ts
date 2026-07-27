@@ -8,6 +8,23 @@
 import { describe, expect, test } from "bun:test";
 
 import { resolveProfileDir } from "../browser/profile-dir.js";
+import { buildStartUrl } from "../browser/chrome-launcher.js";
+
+const MEET_URL = "https://meet.google.com/abc-defg-hij";
+
+describe("buildStartUrl", () => {
+  test("opens the meeting directly when no account is configured", () => {
+    expect(buildStartUrl(MEET_URL, false)).toBe(MEET_URL);
+  });
+
+  test("routes through Google sign-in with the meeting as continue", () => {
+    const url = new URL(buildStartUrl(MEET_URL, true));
+    expect(url.origin).toBe("https://accounts.google.com");
+    expect(url.pathname).toBe("/ServiceLogin");
+    // The meeting must survive round-tripping through the query string.
+    expect(url.searchParams.get("continue")).toBe(MEET_URL);
+  });
+});
 
 const ROOT = "/tmp/chrome-profile";
 const MEETING = "m-1";

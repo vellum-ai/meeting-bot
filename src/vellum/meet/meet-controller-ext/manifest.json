@@ -4,11 +4,17 @@
   "version": "0.0.1",
   "description": "Controls Google Meet on behalf of the Vellum assistant.",
   "permissions": ["nativeMessaging", "scripting", "tabs"],
-  "host_permissions": ["https://meet.google.com/*"],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://accounts.google.com/*"
+  ],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {
-      "matches": ["https://meet.google.com/*"],
+      "matches": [
+        "https://meet.google.com/*",
+        "https://accounts.google.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
