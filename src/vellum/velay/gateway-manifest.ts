@@ -57,62 +57,35 @@ export const IngressRouteKindSchema = z.enum(["http", "websocket"]);
 export type IngressRouteKind = z.infer<typeof IngressRouteKindSchema>;
 
 /**
- * The plugin validates the request entirely on its own — a provider
- * signature only it can check, say. The gateway still enforces the path
- * allowlist.
- */
-export const IngressAuthNoneSchema = z.object({
-  mode: z.literal("none"),
-});
-
-/**
- * A shared secret arrives as a query parameter; the gateway compares it
- * against the plugin's stored credential before forwarding. This is what
- * the meeting-bot realtime socket needs — Recall can attach a query
- * string to the endpoint URL but cannot sign requests or set headers.
+ * One publicly reachable route a plugin is asking the gateway to expose.
  *
- * The plugin names its credential rather than handing the secret over,
- * so the value stays in the store and is resolved by the gateway against
- * the plugin's own credential scope.
+ * Note what is *not* here: authentication. The manifest declares reach —
+ * "this path should survive the allowlist and arrive at my handler" — and
+ * nothing else. Authenticating the caller stays with whoever mints the
+ * credential: the route handler, or the platform service that issued the
+ * callback URL in the first place. Keeping auth out means the gateway
+ * never runs plugin-directed validation logic, and it keeps this schema
+ * (a forward-compatibility commitment, once plugins depend on it) as
+ * small as it can be.
  */
-export const IngressAuthQueryTokenSchema = z.object({
-  mode: z.literal("query-token"),
-  credentialField: z.string().min(1),
-  /** Query parameter carrying the token. */
-  queryParam: z.string().min(1).default("token"),
-});
-
-/**
- * How the gateway authenticates an inbound request before forwarding it.
- *
- * A discriminated union rather than a mode enum plus loose siblings: the
- * fields a mode needs only exist on that mode, so "query-token with no
- * credential field" — a route that looks authenticated but is not — is
- * unrepresentable rather than something validation has to catch.
- *
- * The set of modes is closed on purpose. A plugin declaring its own
- * scheme would put the gateway in the position of executing
- * plugin-supplied validation logic on unauthenticated traffic.
- */
-export const IngressAuthSchema = z.discriminatedUnion("mode", [
-  IngressAuthNoneSchema,
-  IngressAuthQueryTokenSchema,
-]);
-export type IngressAuth = z.infer<typeof IngressAuthSchema>;
-
-/** One publicly reachable route a plugin is asking the gateway to expose. */
 export const IngressRouteSchema = z.object({
   /**
    * Absolute public path, exactly as the external caller will request it.
    * Must start with `/` and carry no query string — the query is runtime
    * data, not part of the route identity.
+   *
+   * No trailing slash: Velay runs `path.Clean` on the inbound path before
+   * matching, which strips trailing slashes, so a pattern derived from
+   * `/foo/` could never match anything.
    */
   path: z
     .string()
     .min(1)
-    .regex(/^\/[^?#\s]*$/, "path must be absolute and free of query/fragment"),
+    .regex(/^\/[^?#\s]*$/, "path must be absolute and free of query/fragment")
+    .refine((p) => p === "/" || !p.endsWith("/"), {
+      message: "path must not end in a trailing slash",
+    }),
   kind: IngressRouteKindSchema,
-  auth: IngressAuthSchema.default({ mode: "none" }),
   /** Human-readable purpose, surfaced in gateway logs and admin UI. */
   description: z.string().min(1),
 });
@@ -132,9 +105,6 @@ export type PluginIngressManifest = z.infer<typeof PluginIngressManifestSchema>;
  * Validate a manifest, including the one rule the schema cannot express:
  * paths must be unique, since two routes claiming the same path would
  * make the gateway's choice of handler arbitrary.
- *
- * Auth well-formedness is enforced by the schema itself — see
- * {@link IngressAuthSchema}.
  */
 export function parseIngressManifest(raw: unknown): PluginIngressManifest {
   const manifest = PluginIngressManifestSchema.parse(raw);
@@ -186,11 +156,10 @@ export function mergeVelayAllowedPaths(
 /**
  * meeting-bot's declaration.
  *
- * One route: the realtime socket the meeting provider dials into. It is
- * `query-token` because Recall attaches the token as a query parameter on
- * the endpoint URL — it cannot sign a request or set a header — which is
- * exactly what `verificationToken` guards today. Moving that check into
- * the gateway is what lets the plugin stop owning a public address.
+ * One route: the realtime socket the meeting provider dials into. The
+ * token Recall carries on that URL is validated by whoever minted it —
+ * the plugin today, the platform meeting service once it issues the
+ * callback URL — not by the gateway.
  */
 export const MEETING_BOT_INGRESS_MANIFEST: PluginIngressManifest =
   parseIngressManifest({
@@ -200,11 +169,6 @@ export const MEETING_BOT_INGRESS_MANIFEST: PluginIngressManifest =
       {
         path: "/webhooks/meeting-bot/realtime",
         kind: "websocket",
-        auth: {
-          mode: "query-token",
-          credentialField: "realtime_token",
-          queryParam: "token",
-        },
         description:
           "Realtime event stream the meeting provider dials into (transcript, participant, and lifecycle events).",
       },
