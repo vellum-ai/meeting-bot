@@ -69,8 +69,66 @@ describe("plugin ingress manifest", () => {
     const route = MEETING_BOT_INGRESS_MANIFEST.routes[0]!;
     expect(route.path).toBe(MEETING_BOT_REALTIME_PATH);
     expect(route.kind).toBe("websocket");
-    expect(route.auth).toBe("query-token");
-    expect(route.tokenQueryParam).toBe("token");
+    expect(route.auth).toEqual({
+      mode: "query-token",
+      credentialField: "realtime_token",
+      queryParam: "token",
+    });
+  });
+
+  test("defaults auth to none and queryParam to token", () => {
+    const manifest = parseIngressManifest({
+      version: 1,
+      plugin: "p",
+      routes: [
+        { path: "/webhooks/a", kind: "http", description: "d" },
+        {
+          path: "/webhooks/b",
+          kind: "websocket",
+          auth: { mode: "query-token", credentialField: "tok" },
+          description: "d",
+        },
+      ],
+    });
+    expect(manifest.routes[0]!.auth).toEqual({ mode: "none" });
+    const auth = manifest.routes[1]!.auth;
+    expect(auth.mode).toBe("query-token");
+    if (auth.mode === "query-token") expect(auth.queryParam).toBe("token");
+  });
+
+  test("rejects a query-token auth carrying no credential field", () => {
+    // The union makes this unrepresentable rather than a runtime check.
+    expect(() =>
+      parseIngressManifest({
+        version: 1,
+        plugin: "p",
+        routes: [
+          {
+            path: "/webhooks/p",
+            kind: "websocket",
+            auth: { mode: "query-token" },
+            description: "d",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  test("rejects an unknown auth mode", () => {
+    expect(() =>
+      parseIngressManifest({
+        version: 1,
+        plugin: "p",
+        routes: [
+          {
+            path: "/webhooks/p",
+            kind: "http",
+            auth: { mode: "hmac", secret: "s" },
+            description: "d",
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   test("derives an exactly-anchored RE2 pattern per route", () => {
@@ -110,23 +168,6 @@ describe("plugin ingress manifest", () => {
     expect(new Set(merged).size).toBe(2);
     // Sorted for a deterministic comparison in the gateway's guard test.
     expect([...merged].sort()).toEqual(merged);
-  });
-
-  test("rejects a query-token route with no credential field", () => {
-    expect(() =>
-      parseIngressManifest({
-        version: 1,
-        plugin: "p",
-        routes: [
-          {
-            path: "/webhooks/p",
-            kind: "websocket",
-            auth: "query-token",
-            description: "d",
-          },
-        ],
-      }),
-    ).toThrow(/tokenCredentialField/);
   });
 
   test("rejects duplicate paths", () => {
