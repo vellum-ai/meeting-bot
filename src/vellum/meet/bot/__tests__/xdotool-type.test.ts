@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, test } from "bun:test";
 
 import { xdotoolType } from "../browser/xdotool-type.js";
+import { defaultXdotoolBinary } from "../browser/xdotool-binary.js";
 
 interface SpawnCall {
   command: string;
@@ -77,7 +78,7 @@ describe("xdotoolType", () => {
     await pending;
 
     expect(fake.calls.length).toBe(1);
-    expect(fake.calls[0]!.command).toBe("/usr/bin/xdotool");
+    expect(fake.calls[0]!.command).toBe(defaultXdotoolBinary());
     expect(fake.calls[0]!.args).toEqual([
       "type",
       "--delay",

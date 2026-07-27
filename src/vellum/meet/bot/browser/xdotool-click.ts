@@ -23,6 +23,8 @@
 
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 
+import { defaultXdotoolBinary } from "./xdotool-binary.js";
+
 /** Logger shape matching the one used by `chrome-launcher`. */
 export interface XdotoolClickLogger {
   info: (message: string) => void;
@@ -52,8 +54,9 @@ export interface XdotoolClickOptions {
   /** X display string (e.g. ":99"). Passed as the `DISPLAY` env var. */
   display: string;
   /**
-   * xdotool binary path. Defaults to `/usr/bin/xdotool` (installed by the
-   * bot container). Override in tests.
+   * xdotool binary path. Defaults to PATH resolution with the container's
+   * `/usr/bin/xdotool` as fallback (see `xdotool-binary.ts`). Override in
+   * tests.
    */
   binary?: string;
   /** `node:child_process.spawn` override for tests. */
@@ -79,7 +82,7 @@ const DEFAULT_TIMEOUT_MS = 5_000;
  * waitForSelector for `INGAME_LEAVE_BUTTON` is the authoritative signal).
  */
 export async function xdotoolClick(opts: XdotoolClickOptions): Promise<void> {
-  const binary = opts.binary ?? "/usr/bin/xdotool";
+  const binary = opts.binary ?? defaultXdotoolBinary();
   const spawnFn = opts.spawn ?? nodeSpawn;
   const logger = opts.logger ?? NOOP_LOGGER;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;

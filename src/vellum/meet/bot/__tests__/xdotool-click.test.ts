@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, test } from "bun:test";
 
 import { xdotoolClick } from "../browser/xdotool-click.js";
+import { defaultXdotoolBinary } from "../browser/xdotool-binary.js";
 
 interface SpawnCall {
   command: string;
@@ -78,7 +79,7 @@ describe("xdotoolClick", () => {
     await pending;
 
     expect(fake.calls.length).toBe(1);
-    expect(fake.calls[0]!.command).toBe("/usr/bin/xdotool");
+    expect(fake.calls[0]!.command).toBe(defaultXdotoolBinary());
     expect(fake.calls[0]!.args).toEqual([
       "mousemove",
       "120",
