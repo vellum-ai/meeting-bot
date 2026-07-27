@@ -155,8 +155,22 @@ function buildChromeArgs(opts: {
   return [
     "--no-sandbox",
     "--disable-dev-shm-usage",
-    "--disable-setuid-sandbox",
-    "--disable-background-networking",
+    // NOTE: `--disable-setuid-sandbox` and `--disable-background-networking`
+    // were removed deliberately (BotGuard trust-signal pass, 2026-07):
+    //
+    //   - `--disable-setuid-sandbox` is redundant with `--no-sandbox` AND
+    //     makes Chromium render its yellow "You are using an unsupported
+    //     command-line flag" infobar. That banner is in every QA screenshot
+    //     of a rejected join: a real user's browser never shows it, and it
+    //     shifts the viewport down, which also skews the trusted-click
+    //     coordinate math in `features/join.ts`.
+    //   - `--disable-background-networking` suppresses the component /
+    //     variations / safe-browsing chatter every genuine Chrome makes on
+    //     startup. Its absence is exactly the kind of "too quiet to be a
+    //     person" signal an anti-abuse system can key on, and it saves us
+    //     nothing here.
+    //
+    // Do not re-add either without re-running a live join.
     "--disable-breakpad",
     "--window-size=1280,720",
     "--window-position=0,0",

@@ -956,6 +956,48 @@ describe("runJoinFlow (content-script port)", () => {
     expect(diag).toBeDefined();
   });
 
+  test("fails immediately when Meet shows its hard-denial page after the knock", async () => {
+    const { doc } = loadPrejoinDom();
+    removeMediaModal(doc);
+    // Meet's refusal page: the admission buttons unmount (the knock was
+    // submitted) and this heading replaces the prejoin surface. The flow
+    // must name it as a client rejection rather than waiting out the
+    // admission budget while Meet counts down to its redirect.
+    const onEvent = unmountAdmissionButtonsOnClick(doc, (e) => {
+      events.push(e);
+      const heading = doc.querySelector("h1") ?? doc.createElement("h1");
+      heading.textContent = "You can't join this video call";
+      if (!heading.isConnected) doc.body.appendChild(heading);
+    });
+    const events: unknown[] = [];
+
+    await expect(
+      runJoinFlow({
+        meetingUrl: "https://meet.google.com/abc-defg-hij",
+        displayName: "Vellum Bot",
+        consentMessage: "Hi, Vellum is listening.",
+        meetingId: "mtg-denied",
+        onEvent,
+        doc,
+      }),
+    ).rejects.toThrow(/refused this client/i);
+
+    // The rejection must be attributed to the client, not to the host.
+    const diag = events.find(
+      (e) =>
+        typeof e === "object" &&
+        e !== null &&
+        (e as { type?: string }).type === "diagnostic" &&
+        (e as { level?: string }).level === "error" &&
+        typeof (e as { message?: string }).message === "string" &&
+        (e as { message: string }).message.includes("You can't join"),
+    );
+    expect(diag).toBeDefined();
+    expect((diag as { message: string }).message).toContain(
+      "not a pending admission",
+    );
+  });
+
   test("emits periodic page surveys while waiting out the post-knock window", async () => {
     const { doc } = loadPrejoinDom();
     removeMediaModal(doc);

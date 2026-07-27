@@ -170,6 +170,7 @@ function makeDeps(opts: MakeDepsOpts = {}): {
     nmhSocketPath: "/run/nmh.sock",
     xvfbDisplay: ":99",
     chromeUserDataRoot: "/tmp/chrome-profile",
+    chromeProfilePersist: false,
     avatarEnabled: false,
     avatarRenderer: "noop",
     avatarConfigJson: undefined,

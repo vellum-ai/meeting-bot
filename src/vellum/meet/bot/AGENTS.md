@@ -30,6 +30,26 @@ Bot ↔ extension communication flows through Chrome Native Messaging:
 
 Do not add Playwright, Puppeteer, or any CDP-based library to this package. The entire reason for the extension architecture is that Google Meet's BotGuard rejects CDP-attached clients before the prejoin renders — see the Phase 1.11 plan at `.private/plans/archived/meet-phase-1-11-chrome-extension.md` for the empirical repro.
 
+## BotGuard: anonymous joins are currently refused (2026-07)
+
+QA established, with page surveys + `knock.png`, that Meet **hard-denies** our anonymous client at knock submission:
+
+- The prejoin surface renders, the name is accepted, the trusted click registers — then Meet replaces the page with **"You can't join this video call"** and a 60s "Returning to home screen" countdown, after which the tab is redirected to `workspace.google.com/products/meet/`. The ~61s bounces in earlier logs were that countdown, not a timeout.
+- No `accounts.google.com` redirect, and **no admit prompt ever reaches the host** — the request is killed before it gets there. The page's "invited or admitted by the host" copy is generic reassurance, not a description of what happened.
+- This is the same denial string BotGuard used for CDP-attached clients above; the detector now evaluates at the join request rather than at page load.
+
+The join flow fails fast on this string (`detectJoinDenial` in `../meet-controller-ext/src/features/join.ts`) instead of waiting out the countdown.
+
+**What has been tried:** trust-signal hygiene — a persistent Chrome profile (`browser/profile-dir.ts`) instead of a fresh cookieless one per join, and removal of `--disable-setuid-sandbox` (which rendered Chromium's automation infobar on every page) and `--disable-background-networking`.
+
+**What is known about the sanctioned paths:**
+
+- Recall.ai's own guide to building an in-house Meet bot states plainly that a **real Google account is required** and that service accounts do not work. Recall's *customers* don't supply credentials because Recall provisions and rotates its own bot accounts — not because the join is anonymous. Anonymous joining is not a capability we are missing; it is one Google does not offer.
+- The **Meet Media API** is Google's first-class real-time media path, but it is Developer Preview and requires *every participant* to be enrolled in the preview program — unusable for joining arbitrary customer meetings.
+- **Bots on Demand** exists for automated participants but is allowlist-only and aimed at performance testing.
+
+If anonymous joins must work, the remaining lever is a signed-in bot account (Option A), not further flag tuning.
+
 ## Testing
 
 ```bash

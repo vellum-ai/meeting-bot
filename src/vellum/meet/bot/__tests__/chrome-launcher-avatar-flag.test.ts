@@ -94,8 +94,11 @@ const BASE_OPTS = {
 const BASELINE_ARGV: readonly string[] = [
   "--no-sandbox",
   "--disable-dev-shm-usage",
-  "--disable-setuid-sandbox",
-  "--disable-background-networking",
+  // `--disable-setuid-sandbox` and `--disable-background-networking` were
+  // intentionally removed in the BotGuard trust-signal pass (2026-07) —
+  // the former rendered Chromium's "unsupported command-line flag"
+  // infobar on every page, the latter silenced startup network chatter a
+  // real Chrome always makes. See `buildChromeArgs` for the full note.
   "--disable-breakpad",
   "--window-size=1280,720",
   "--window-position=0,0",
@@ -202,8 +205,6 @@ describe("launchChrome avatarEnabled flag", () => {
     expect(fake.calls[0]!.args).toEqual([
       "--no-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-setuid-sandbox",
-      "--disable-background-networking",
       "--disable-breakpad",
       "--window-size=1280,720",
       "--window-position=0,0",

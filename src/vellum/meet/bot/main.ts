@@ -77,6 +77,7 @@ import {
   type XvfbHandle,
 } from "./browser/xvfb.js";
 import { captureDisplayScreenshot } from "./browser/screenshot.js";
+import { resolveProfileDir } from "./browser/profile-dir.js";
 import { ensureNmhManifestRegistered } from "./native-messaging/register-manifest.js";
 import { DaemonClient } from "./control/daemon-client.js";
 import {
@@ -158,6 +159,12 @@ interface BotEnv {
   /** User-data directory root for Chrome — suffixed with meetingId per launch. */
   chromeUserDataRoot: string;
   /**
+   * Whether to reuse one persistent Chrome profile across joins. Default
+   * true; set `CHROME_PROFILE_PERSIST=0` to restore the old per-meeting
+   * profile behavior. See `browser/profile-dir.ts`.
+   */
+  chromeProfilePersist: boolean;
+  /**
    * Phase 4 avatar opt-in. `AVATAR_ENABLED=1` (or a common truthy
    * synonym — `true`, `yes`, `on`) threads the v4l2loopback camera flags
    * through to {@link launchChrome}. Absent or any non-truthy value falls
@@ -228,6 +235,7 @@ function readEnv(env: NodeJS.ProcessEnv = process.env): BotEnv {
     nmhSocketPath: env.NMH_SOCKET_PATH ?? "/run/nmh.sock",
     xvfbDisplay: env.XVFB_DISPLAY ?? ":99",
     chromeUserDataRoot: env.CHROME_USER_DATA_ROOT ?? "/tmp/chrome-profile",
+    chromeProfilePersist: env.CHROME_PROFILE_PERSIST !== "0",
     avatarEnabled: parseBooleanEnv(env.AVATAR_ENABLED),
     avatarRenderer: env.AVATAR_RENDERER ?? "noop",
     avatarConfigJson: env.AVATAR_CONFIG_JSON,
@@ -842,8 +850,20 @@ export async function runBot(deps: BotDeps): Promise<void> {
     const socketDir = dirname(env.nmhSocketPath);
     deps.ensureDir(socketDir);
 
-    const userDataDir = `${env.chromeUserDataRoot}-${meetingId}`;
+    // Prefer a persistent profile: a browser with no cookies and no history
+    // is the most anomalous thing about this client. Falls back to the old
+    // per-meeting dir when a concurrent session already holds the shared
+    // profile. See `browser/profile-dir.ts`.
+    const profile = resolveProfileDir({
+      root: env.chromeUserDataRoot,
+      meetingId,
+      persist: env.chromeProfilePersist,
+    });
+    const userDataDir = profile.dir;
     deps.ensureDir(userDataDir);
+    deps.logInfo(
+      `meet-bot: chrome profile ${profile.kind} at ${userDataDir} (${profile.reason})`,
+    );
 
     // Register the native-messaging host for this profile before Chrome
     // starts. Without it, the extension's connectNative finds no host, no
