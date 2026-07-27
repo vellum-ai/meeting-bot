@@ -6,12 +6,17 @@
  */
 import { startAvatarFeature } from "./features/avatar.js";
 import { startContentBridge } from "./messaging/content-bridge.js";
+import { startNavWatcher } from "./messaging/nav-watcher.js";
 import { openNativePort } from "./messaging/native-port.js";
 
 console.log("[meet-ext] background booted");
 
 const port = openNativePort({});
 startContentBridge(port);
+
+// Report the Meet tab navigating off meet.google.com (content scripts die
+// with the page, so only the background can see where the tab went).
+startNavWatcher(port, chrome.tabs);
 
 // Phase 4 — avatar feature. Opens a pinned second Chrome tab when the
 // bot sends `avatar.start` and forwards `avatar.push_viseme` into that

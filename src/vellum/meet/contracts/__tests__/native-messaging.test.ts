@@ -23,6 +23,7 @@ import {
   ExtensionDiagnosticMessageSchema,
   ExtensionInboundChatMessageSchema,
   ExtensionLifecycleMessageSchema,
+  ExtensionPageNavigatedMessageSchema,
   ExtensionParticipantChangeMessageSchema,
   ExtensionReadyMessageSchema,
   ExtensionSendChatResultMessageSchema,
@@ -47,6 +48,7 @@ describe("EXTENSION_TO_BOT_MESSAGE_TYPES", () => {
         "speaker.change",
         "chat.inbound",
         "diagnostic",
+        "page_navigated",
         "trusted_click",
         "trusted_type",
         "send_chat_result",
@@ -210,6 +212,30 @@ describe("ExtensionDiagnosticMessageSchema", () => {
         type: "diagnostic",
         level: "warn",
         message: "mid-severity",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("ExtensionPageNavigatedMessageSchema", () => {
+  test("parses an off-meet navigation report", () => {
+    const input = {
+      type: "page_navigated" as const,
+      url: "https://workspace.google.com/products/meet/",
+      fromUrl: "https://meet.google.com/abc-defg-hij",
+      timestamp: "2026-07-27T00:00:00Z",
+    };
+    const parsed = ExtensionPageNavigatedMessageSchema.parse(input);
+    expect(parsed).toEqual(input);
+  });
+
+  test("rejects an empty destination url", () => {
+    expect(() =>
+      ExtensionPageNavigatedMessageSchema.parse({
+        type: "page_navigated",
+        url: "",
+        fromUrl: "https://meet.google.com/abc-defg-hij",
+        timestamp: "2026-07-27T00:00:00Z",
       }),
     ).toThrow();
   });
