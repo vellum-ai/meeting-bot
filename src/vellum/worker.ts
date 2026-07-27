@@ -79,6 +79,11 @@ import { setMeetHost } from "./meet/tool-runtime.ts";
 import type { DaemonRuntimeMode } from "./meet/plugin-host.ts";
 import { augmentProcessEnv } from "../path-env.ts";
 import { ensureBrowserStack } from "./browser-stack.ts";
+import {
+  LEGACY_BROWSER_BOT_ENV,
+  legacyBrowserBotDisabledMessage,
+  legacyBrowserBotEnabled,
+} from "./legacy-browser-bot.ts";
 import { ensureRelocatedCompatLinks } from "./relocated-compat.ts";
 import { startMeetIngress } from "./ingress.ts";
 import { createJoinStatusTracker } from "./join-status.ts";
@@ -235,8 +240,20 @@ async function main(): Promise<void> {
   log.info(`meet bot backend selected: ${backend}`, { socketPath });
   // Direct backend: install the browser stack now (init / provider switch),
   // asynchronously so readiness is not delayed. Joins await this promise.
+  //
+  // Skipped entirely while the legacy browser path is disabled — an
+  // `apt-get install` that mutates the host at every plugin init is not
+  // something to run for a join path that cannot succeed. See
+  // `./legacy-browser-bot.ts`.
+  const legacyBrowserBot = legacyBrowserBotEnabled();
+  if (!legacyBrowserBot) {
+    log.info(
+      "vellum: self-hosted browser bot disabled; skipping browser-stack install",
+      { reenableWith: `${LEGACY_BROWSER_BOT_ENV}=1` },
+    );
+  }
   const browserStackReady =
-    backend === "direct"
+    backend === "direct" && legacyBrowserBot
       ? ensureBrowserStack(host.logger.get("browser-stack"))
       : Promise.resolve({ ok: true as const, missing: [] as string[] });
 
@@ -307,6 +324,15 @@ async function main(): Promise<void> {
       }
 
       if (path === "/join") {
+        // The self-hosted browser bot is the only joiner this runtime has,
+        // and it is disabled by default (see `./legacy-browser-bot.ts`).
+        // Refuse here rather than spawning a bot that cannot get admitted.
+        if (!legacyBrowserBot) {
+          return jsonResponse(
+            { error: legacyBrowserBotDisabledMessage() },
+            409,
+          );
+        }
         const meetingUrl =
           typeof body.meetingUrl === "string" ? body.meetingUrl.trim() : "";
         // Platform-aware refusal: a Zoom/Teams link is a real meeting link

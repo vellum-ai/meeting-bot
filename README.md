@@ -83,8 +83,20 @@ script polls the worker's `/status` endpoint until the outcome is known,
 reporting joined, failed (with the reason), or still-pending. Join
 attempts, failures, and successes are recorded durably in
 `data/history.json` and shown with statuses in the dashboard's meeting
-history. In direct (non-Docker) mode, the browser stack the bot needs is
-installed asynchronously at worker boot (plugin init and provider
+history.
+
+> **The self-hosted browser bot is disabled by default.** Google Meet
+> refuses anonymous automated clients, so this path cannot complete a join
+> (see [`src/vellum/meet/bot/AGENTS.md`](src/vellum/meet/bot/AGENTS.md)).
+> With it off, the worker no longer runs its `apt-get` browser-stack
+> install at plugin init, and `/join` refuses with an actionable error
+> rather than spawning a bot that will be denied. Use the `recall` provider
+> for working joins. Set `VELLUM_MEET_LEGACY_BROWSER_BOT=1` to re-enable it
+> for local work on the vendored tree. The replacement is the Velay ingress
+> path in [`src/vellum/velay/`](src/vellum/velay/gateway-manifest.ts).
+
+When it is enabled, in direct (non-Docker) mode the browser stack the bot
+needs is installed asynchronously at worker boot (plugin init and provider
 switches); a join can wait for an in-flight install but never triggers
 one.
 
