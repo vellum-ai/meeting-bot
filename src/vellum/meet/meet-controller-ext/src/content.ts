@@ -32,7 +32,6 @@ import { BotToExtensionMessageSchema } from "../../contracts/native-messaging.js
 import { enqueueSendChat, handleCameraToggle } from "./handle-send-chat.js";
 import { type ChatReader, startChatReader } from "./features/chat.js";
 import { runJoinFlow } from "./features/join.js";
-import { isSignInPage, runSignInFlow } from "./features/sign-in.js";
 import {
   startParticipantScraper,
   type ParticipantScraperHandle,
@@ -43,16 +42,6 @@ import {
 } from "./features/speaker.js";
 
 console.log("[meet-ext] content script loaded on", location.href);
-
-// The script matches two origins. On Google's sign-in page there is no
-// meeting to drive: announce that the bot needs to authenticate and wait
-// for the `sign_in` command carrying the account. Chrome is launched at
-// the sign-in URL with `continue=<meetUrl>`, so a successful login (or an
-// already-signed-in persistent profile) navigates straight to the meeting
-// and this script re-mounts in its Meet role.
-if (isSignInPage(location.href)) {
-  emit({ type: "sign_in_required" });
-}
 
 /**
  * Extract the meeting id from the current page URL.
@@ -102,18 +91,6 @@ function extractMeetingIdFromUrl(url: string): string | null {
  * error) stays in lockstep on the timestamp/meetingId shape required by
  * `ExtensionLifecycleMessageSchema`.
  */
-/**
- * Module-scope fire-and-forget emit to the background bridge. The bridge
- * validates and forwards to the native port; no response is expected.
- */
-function emit(event: ExtensionToBotMessage): void {
-  try {
-    void chrome.runtime.sendMessage(event);
-  } catch (err) {
-    console.warn("[meet-ext] sendMessage failed:", err);
-  }
-}
-
 function lifecycleMessage(
   state: "joining" | "joined" | "left" | "error",
   meetingId: string,
@@ -271,32 +248,6 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
       void handleJoin(msg.meetingUrl, msg.displayName, msg.consentMessage);
-      return false;
-    }
-
-    if (msg.type === "sign_in") {
-      // Only the sign-in tab drives this. On a Meet tab the selectors
-      // would never match and the flow would burn its step timeout.
-      if (!isSignInPage(location.href)) {
-        sendResponse({ ok: false, reason: "not-a-sign-in-tab" });
-        return false;
-      }
-      void runSignInFlow({
-        email: msg.email,
-        password: msg.password,
-        onEvent: emit,
-      }).catch((err: unknown) => {
-        // `runSignInFlow` already emitted a diagnostic naming the cause;
-        // escalate to a lifecycle error so the daemon tears the bot down
-        // instead of waiting out the join deadline on a login page.
-        emit({
-          type: "lifecycle",
-          state: "error",
-          detail: err instanceof Error ? err.message : String(err),
-          meetingId: deriveMeetingId(),
-          timestamp: new Date().toISOString(),
-        });
-      });
       return false;
     }
 

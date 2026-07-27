@@ -20,11 +20,6 @@ import {
   ProviderChangeSchema,
   readConfigView,
 } from "./app-settings.ts";
-import {
-  GoogleCredentialsUpdateSchema,
-  googleCredentialsStatus,
-  storeGoogleCredentials,
-} from "./google-credentials.ts";
 import { JoinRequestError, startJoinFromApp } from "./join-flow.ts";
 import { readMeetingHistory } from "./meeting-history.ts";
 import { restartProviderRuntime } from "./provider-runtime.ts";
@@ -110,55 +105,6 @@ export function handleMeetingLogGet(request: Request): Response {
  */
 export function handleSettingsGet(): Response {
   return json(readConfigView(pluginConfigPath()));
-}
-
-/**
- * `GET /x/plugins/meeting-bot/google-credentials`: whether the vellum
- * bot's Google account is configured. Presence booleans only — the values
- * never leave the credential store, so there is nothing here to leak.
- */
-export async function handleGoogleCredentialsGet(): Promise<Response> {
-  return json(await googleCredentialsStatus());
-}
-
-/**
- * `POST /x/plugins/meeting-bot/google-credentials`: store the bot
- * account's email and/or password in the credential store.
- *
- * Deliberately not part of the settings PATCH: settings writes land in
- * `config.json`, and these values must never go near it. Either field may
- * be omitted to update just the other one.
- */
-export async function handleGoogleCredentialsPost(
-  request: Request,
-): Promise<Response> {
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return json({ error: "request body must be valid JSON" }, 400);
-  }
-
-  const parsed = GoogleCredentialsUpdateSchema.safeParse(raw);
-  if (!parsed.success) {
-    const detail = parsed.error.issues
-      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
-      .join("; ");
-    return json({ error: `invalid credentials update: ${detail}` }, 400);
-  }
-
-  try {
-    await storeGoogleCredentials(parsed.data);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return json({ error: message }, 502);
-  }
-
-  // The runtime reads the account once at spawn and injects it into the
-  // worker's env, so a write only takes effect after a restart. Bounce it
-  // here rather than leaving the user with stored-but-inert credentials.
-  const note = await restartProviderRuntime();
-  return json({ ...(await googleCredentialsStatus()), note });
 }
 
 /**

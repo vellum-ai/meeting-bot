@@ -153,24 +153,6 @@ export type ExtensionPageNavigatedMessage = z.infer<
 >;
 
 /**
- * Emitted by the extension when its content script mounts on
- * `accounts.google.com` — the bot must sign its Google account in before
- * the meeting will admit it. The bot replies with a `sign_in` command
- * carrying the account, which it holds in env and never puts on the page
- * until asked.
- *
- * Carries no payload: the URL is implicit (the content script only
- * matches the sign-in origin) and the bot already knows which account it
- * is configured with.
- */
-export const ExtensionSignInRequiredMessageSchema = z.object({
-  type: z.literal("sign_in_required"),
-});
-export type ExtensionSignInRequiredMessage = z.infer<
-  typeof ExtensionSignInRequiredMessageSchema
->;
-
-/**
  * Ask the bot to dispatch a REAL X-server mouse click at the given screen
  * coordinates (via xdotool inside the bot container). Google Meet gates
  * several critical buttons (the prejoin admission button in particular)
@@ -516,7 +498,6 @@ export const ExtensionToBotMessageSchema = z.discriminatedUnion("type", [
   ExtensionInboundChatMessageSchema,
   ExtensionDiagnosticMessageSchema,
   ExtensionPageNavigatedMessageSchema,
-  ExtensionSignInRequiredMessageSchema,
   ExtensionTrustedClickMessageSchema,
   ExtensionTrustedTypeMessageSchema,
   ExtensionSendChatResultMessageSchema,
@@ -535,7 +516,6 @@ export const EXTENSION_TO_BOT_MESSAGE_TYPES = [
   "chat.inbound",
   "diagnostic",
   "page_navigated",
-  "sign_in_required",
   "trusted_click",
   "trusted_type",
   "send_chat_result",
@@ -568,24 +548,6 @@ export const BotJoinCommandSchema = z.object({
   consentMessage: z.string().min(1),
 });
 export type BotJoinCommand = z.infer<typeof BotJoinCommandSchema>;
-
-/**
- * Hand the extension the Google account to sign in with, in response to
- * `sign_in_required`.
- *
- * The credentials live in the credential store and reach the bot through
- * its environment (see `src/vellum/google-account-env.ts`); this is the
- * only point at which they cross into the browser, and only after the
- * extension has reported it is sitting on Google's sign-in page.
- */
-export const BotSignInCommandSchema = z.object({
-  type: z.literal("sign_in"),
-  /** Bot account email address. */
-  email: z.string().min(1),
-  /** Bot account password. */
-  password: z.string().min(1),
-});
-export type BotSignInCommand = z.infer<typeof BotSignInCommandSchema>;
 
 /**
  * Ask the extension to cleanly leave the current meeting. Mirrors the
@@ -727,7 +689,6 @@ export type BotAvatarPushVisemeCommand = z.infer<
  */
 export const BotToExtensionMessageSchema = z.discriminatedUnion("type", [
   BotJoinCommandSchema,
-  BotSignInCommandSchema,
   BotLeaveCommandSchema,
   BotSendChatCommandSchema,
   BotAvatarStartCommandSchema,
@@ -741,7 +702,6 @@ export type BotToExtensionMessage = z.infer<typeof BotToExtensionMessageSchema>;
 /** All bot→extension `type` discriminator values as a const tuple. */
 export const BOT_TO_EXTENSION_MESSAGE_TYPES = [
   "join",
-  "sign_in",
   "leave",
   "send_chat",
   "avatar.start",

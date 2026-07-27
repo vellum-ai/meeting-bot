@@ -77,13 +77,6 @@ import {
   type XvfbHandle,
 } from "./browser/xvfb.js";
 import { captureDisplayScreenshot } from "./browser/screenshot.js";
-import { resolveProfileDir } from "./browser/profile-dir.js";
-import { buildStartUrl } from "./browser/chrome-launcher.js";
-import {
-  googleAccountMissingMessage,
-  hasGoogleAccountEnv,
-  readGoogleAccountEnv,
-} from "../../google-account-env.js";
 import { ensureNmhManifestRegistered } from "./native-messaging/register-manifest.js";
 import { DaemonClient } from "./control/daemon-client.js";
 import {
@@ -165,12 +158,6 @@ interface BotEnv {
   /** User-data directory root for Chrome — suffixed with meetingId per launch. */
   chromeUserDataRoot: string;
   /**
-   * Whether to reuse one persistent Chrome profile across joins. Default
-   * true; set `CHROME_PROFILE_PERSIST=0` to restore the old per-meeting
-   * profile behavior. See `browser/profile-dir.ts`.
-   */
-  chromeProfilePersist: boolean;
-  /**
    * Phase 4 avatar opt-in. `AVATAR_ENABLED=1` (or a common truthy
    * synonym — `true`, `yes`, `on`) threads the v4l2loopback camera flags
    * through to {@link launchChrome}. Absent or any non-truthy value falls
@@ -241,7 +228,6 @@ function readEnv(env: NodeJS.ProcessEnv = process.env): BotEnv {
     nmhSocketPath: env.NMH_SOCKET_PATH ?? "/run/nmh.sock",
     xvfbDisplay: env.XVFB_DISPLAY ?? ":99",
     chromeUserDataRoot: env.CHROME_USER_DATA_ROOT ?? "/tmp/chrome-profile",
-    chromeProfilePersist: env.CHROME_PROFILE_PERSIST !== "0",
     avatarEnabled: parseBooleanEnv(env.AVATAR_ENABLED),
     avatarRenderer: env.AVATAR_RENDERER ?? "noop",
     avatarConfigJson: env.AVATAR_CONFIG_JSON,
@@ -856,20 +842,8 @@ export async function runBot(deps: BotDeps): Promise<void> {
     const socketDir = dirname(env.nmhSocketPath);
     deps.ensureDir(socketDir);
 
-    // Prefer a persistent profile: a browser with no cookies and no history
-    // is the most anomalous thing about this client. Falls back to the old
-    // per-meeting dir when a concurrent session already holds the shared
-    // profile. See `browser/profile-dir.ts`.
-    const profile = resolveProfileDir({
-      root: env.chromeUserDataRoot,
-      meetingId,
-      persist: env.chromeProfilePersist,
-    });
-    const userDataDir = profile.dir;
+    const userDataDir = `${env.chromeUserDataRoot}-${meetingId}`;
     deps.ensureDir(userDataDir);
-    deps.logInfo(
-      `meet-bot: chrome profile ${profile.kind} at ${userDataDir} (${profile.reason})`,
-    );
 
     // Register the native-messaging host for this profile before Chrome
     // starts. Without it, the extension's connectNative finds no host, no
@@ -931,10 +905,7 @@ export async function runBot(deps: BotDeps): Promise<void> {
     }
 
     subsystems.chrome = await deps.launchChrome({
-      // Sign-in first when an account is configured; Google's `continue`
-      // parameter carries the browser through to the meeting. See
-      // `browser/chrome-launcher.ts`.
-      meetingUrl: buildStartUrl(meetUrl, hasGoogleAccountEnv(process.env)),
+      meetingUrl: meetUrl,
       displayNumber: env.xvfbDisplay,
       extensionPath: env.extensionPath,
       userDataDir,
@@ -1266,35 +1237,6 @@ export async function runBot(deps: BotDeps): Promise<void> {
         if (msg.level === "error") deps.logError(`[ext] ${msg.message}`);
         else deps.logInfo(`[ext] ${msg.message}`);
         return;
-      case "sign_in_required": {
-        // The extension is sitting on Google's sign-in page. Hand it the
-        // account — this is the only point at which the credentials cross
-        // into the browser, and only in response to the extension asking.
-        const account = readGoogleAccountEnv(process.env);
-        if (account === null) {
-          const detail = googleAccountMissingMessage();
-          deps.logError(`meet-bot: ${detail}`);
-          void shutdown("error", detail).then(() => {
-            detachSigterm();
-            detachSigint();
-            deps.exit(1);
-          });
-          return;
-        }
-        deps.logInfo(
-          "meet-bot: extension requested sign-in; sending the bot account",
-        );
-        try {
-          subsystems.socketServer?.sendToExtension({
-            type: "sign_in",
-            email: account.email,
-            password: account.password,
-          });
-        } catch (err) {
-          deps.logError(`meet-bot: failed to send sign_in: ${errMsg(err)}`);
-        }
-        return;
-      }
       case "page_navigated": {
         // Source-tab gate: `page_navigated` carries no meetingId, but its
         // `fromUrl` is the Meet URL the tab was on — derive the code from

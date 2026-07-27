@@ -155,22 +155,8 @@ function buildChromeArgs(opts: {
   return [
     "--no-sandbox",
     "--disable-dev-shm-usage",
-    // NOTE: `--disable-setuid-sandbox` and `--disable-background-networking`
-    // were removed deliberately (BotGuard trust-signal pass, 2026-07):
-    //
-    //   - `--disable-setuid-sandbox` is redundant with `--no-sandbox` AND
-    //     makes Chromium render its yellow "You are using an unsupported
-    //     command-line flag" infobar. That banner is in every QA screenshot
-    //     of a rejected join: a real user's browser never shows it, and it
-    //     shifts the viewport down, which also skews the trusted-click
-    //     coordinate math in `features/join.ts`.
-    //   - `--disable-background-networking` suppresses the component /
-    //     variations / safe-browsing chatter every genuine Chrome makes on
-    //     startup. Its absence is exactly the kind of "too quiet to be a
-    //     person" signal an anti-abuse system can key on, and it saves us
-    //     nothing here.
-    //
-    // Do not re-add either without re-running a live join.
+    "--disable-setuid-sandbox",
+    "--disable-background-networking",
     "--disable-breakpad",
     "--window-size=1280,720",
     "--window-position=0,0",
@@ -238,28 +224,6 @@ function relocatedChromeBinary(): string | null {
  * dir), then the container's `/usr/bin/chromium` as the last resort so the
  * Docker image needs no PATH assumptions.
  */
-/**
- * Build the URL Chrome opens with.
- *
- * When the bot has a Google account, it opens Google's sign-in page with
- * `continue=<meetingUrl>` instead of the meeting directly. Google then
- * does the navigation itself: an already-signed-in persistent profile
- * redirects straight through to the meeting, and a fresh one lands on the
- * login form, which the extension drives before the same redirect fires.
- * Either way there is exactly one navigation and no polling.
- *
- * Without an account we open the meeting directly, preserving the old
- * (anonymous) behavior — the join then fails at Meet's denial page with
- * the message that names the missing account.
- */
-export function buildStartUrl(
-  meetingUrl: string,
-  hasGoogleAccount: boolean,
-): string {
-  if (!hasGoogleAccount) return meetingUrl;
-  return `https://accounts.google.com/ServiceLogin?continue=${encodeURIComponent(meetingUrl)}`;
-}
-
 export function defaultChromeBinary(): string {
   const fromEnv = process.env.CHROME_BINARY?.trim();
   if (fromEnv) return fromEnv;

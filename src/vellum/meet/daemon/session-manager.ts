@@ -84,7 +84,6 @@ import {
   trustedTypeHttpTimeoutMs,
 } from "../contracts/native-messaging.js";
 import { getMeetConfig } from "../meet-config.js";
-import { googleAccountBotEnv } from "../../google-account-env.js";
 import type { MeetAudioIngest } from "./audio-ingest.js";
 import { AUDIO_INGEST_SUB_MODULE } from "./audio-ingest.js";
 import type {
@@ -1320,12 +1319,6 @@ class MeetSessionManagerImpl {
       // streams raw PCM and the daemon forwards it to the configured
       // streaming STT provider.
       TTS_API_KEY: ttsKey,
-      // Google bot account. Injected into this worker's env by the daemon
-      // (`src/vellum/runtime.ts`) and forwarded here so the bot can sign in
-      // before joining — Meet refuses anonymous automated clients. Absent
-      // in tests and when no account is stored; the worker's /join refuses
-      // before ever reaching this point in that case.
-      ...googleAccountBotEnv(process.env),
       // Enable the in-container Pulse null-sink by default (set to "1" to
       // disable in dev). Match the meet-bot image expectation.
       SKIP_PULSE: "0",

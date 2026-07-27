@@ -40,22 +40,24 @@ QA established, with page surveys + `knock.png`, that Meet **hard-denies** our a
 
 The join flow fails fast on this string (`detectJoinDenial` in `../meet-controller-ext/src/features/join.ts`) instead of waiting out the countdown.
 
-**What has been tried:** trust-signal hygiene — a persistent Chrome profile (`browser/profile-dir.ts`) instead of a fresh cookieless one per join, and removal of `--disable-setuid-sandbox` (which rendered Chromium's automation infobar on every page) and `--disable-background-networking`.
-
 **What is known about the sanctioned paths:**
 
 - Recall.ai's own guide to building an in-house Meet bot states plainly that a **real Google account is required** and that service accounts do not work. Recall's *customers* don't supply credentials because Recall provisions and rotates its own bot accounts — not because the join is anonymous. Anonymous joining is not a capability we are missing; it is one Google does not offer.
 - The **Meet Media API** is Google's first-class real-time media path, but it is Developer Preview and requires *every participant* to be enrolled in the preview program — unusable for joining arbitrary customer meetings.
 - **Bots on Demand** exists for automated participants but is allowlist-only and aimed at performance testing.
 
-**Current approach — a signed-in bot account.** The vellum provider now requires a dedicated Google account:
+Zoom is no better: since 2 March 2026 a Meeting SDK app joining a meeting outside its own account needs a ZAK or OBF token, and an OBF token is tied to a real participant who is already present — the bot cannot join before they arrive and disconnects when they leave.
 
-- Credentials live ONLY in the credential store (`meeting-bot/google_email`, `meeting-bot/google_password`). Nothing — not the values, not a credential id or path — is written to `config.json`. Set them from the dashboard or with `assistant credentials set`.
-- The daemon resolves them once per runtime start and injects them into the worker's **environment** (never argv, which `ps` exposes); the worker forwards them into each bot's environment. See `src/vellum/google-account-env.ts`.
-- Chrome opens `accounts.google.com/ServiceLogin?continue=<meetUrl>`, so an already-signed-in persistent profile redirects straight to the meeting and a cold one lands on the login form. The extension's `features/sign-in.ts` drives that form with the same trusted-input machinery the join flow uses, then Google's `continue` carries the browser to the meeting.
-- The persistent Chrome profile (`browser/profile-dir.ts`) is what makes this cheap after the first join: the session survives, so most joins skip the form entirely.
+## Direction: this tree is being superseded (2026-07)
 
-2FA, "verify it's you" device challenges, and "couldn't sign you in" are detected and reported as actionable errors rather than retried — they need account configuration (disable 2-Step Verification on the bot account, or warm the profile by signing in once by hand), not more automation.
+Two options were considered and **both are closed**:
+
+- *Trust-signal hygiene* (persistent profile, quieter launch flags) — an arms race against an anti-abuse system Google maintains, with no durable win.
+- *A signed-in bot account* — workable in principle, but it means provisioning and rotating Google accounts, storing their passwords, and automating a login form that fights back with 2FA and device challenges.
+
+Neither is an engineering problem this repo can settle, so the `vellum` provider is being reshaped into a **client of Velay** rather than a browser driver: see [`src/velay/`](../../../velay/PLUGIN-SURFACE.md). This tree stays in place and keeps working for now; it should not be extended. New work on the `vellum` path belongs in `src/velay/`.
+
+The diagnostics built during this investigation — the page surveys, `knock.png`, `failure.png`, and the off-meet navigation report — are worth keeping regardless: they are what turned "the bot times out" into "Meet refuses this client at knock submission, here is the pixel evidence".
 
 ## Testing
 

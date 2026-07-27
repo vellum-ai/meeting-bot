@@ -165,27 +165,6 @@ assistant credentials set --service meeting-bot --field api_key "recall_..."
 
 At call time the plugin resolves it in-process via the host's `resolveCredential`.
 
-### Google account (vellum provider)
-
-The `vellum` provider drives its own browser, and Google refuses anonymous
-automated clients — a knock from a signed-out bot is denied before it ever
-reaches the host. So the vellum bot signs in as a **dedicated bot account you
-provision** (not an end user's personal account):
-
-```bash
-assistant credentials set --service meeting-bot --field google_email "bot@example.com"
-assistant credentials set --service meeting-bot --field google_password "..."
-```
-
-Or set them from the meeting-bot dashboard, which writes them to the same
-credential store and restarts the provider runtime so they take effect.
-
-Like the API key, these live only in the credential store — neither the values
-nor any reference to them is written to `config.json`. The account should have
-2-Step Verification disabled, or be signed in once by hand so the bot's
-persistent Chrome profile carries the session; the bot reports either as an
-actionable error rather than silently failing to join.
-
 Notable optional fields: `region` (default `us-east-1`), `listenPort` (the
 local loopback port the active provider runtime listens on; always bound on
 `127.0.0.1`), `verificationToken` (shared secret appended as `?token=…` and

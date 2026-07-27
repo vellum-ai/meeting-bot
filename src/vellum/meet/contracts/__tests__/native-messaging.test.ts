@@ -49,7 +49,6 @@ describe("EXTENSION_TO_BOT_MESSAGE_TYPES", () => {
         "chat.inbound",
         "diagnostic",
         "page_navigated",
-        "sign_in_required",
         "trusted_click",
         "trusted_type",
         "send_chat_result",
@@ -66,7 +65,6 @@ describe("BOT_TO_EXTENSION_MESSAGE_TYPES", () => {
     expect(new Set(BOT_TO_EXTENSION_MESSAGE_TYPES)).toEqual(
       new Set([
         "join",
-        "sign_in",
         "leave",
         "send_chat",
         "avatar.start",
@@ -238,40 +236,6 @@ describe("ExtensionPageNavigatedMessageSchema", () => {
         url: "",
         fromUrl: "https://meet.google.com/abc-defg-hij",
         timestamp: "2026-07-27T00:00:00Z",
-      }),
-    ).toThrow();
-  });
-});
-
-describe("sign-in messages", () => {
-  test("parses the extension's sign_in_required announcement", () => {
-    const input = { type: "sign_in_required" as const };
-    const parsed = ExtensionToBotMessageSchema.parse(input);
-    expect(parsed).toEqual(input);
-  });
-
-  test("parses the bot's sign_in command", () => {
-    const input = {
-      type: "sign_in" as const,
-      email: "bot@example.com",
-      password: "s3cret",
-    };
-    const parsed = BotToExtensionMessageSchema.parse(input);
-    expect(parsed).toEqual(input);
-  });
-
-  test("rejects a sign_in missing either half of the account", () => {
-    expect(() =>
-      BotToExtensionMessageSchema.parse({
-        type: "sign_in",
-        email: "bot@example.com",
-      }),
-    ).toThrow();
-    expect(() =>
-      BotToExtensionMessageSchema.parse({
-        type: "sign_in",
-        email: "",
-        password: "s3cret",
       }),
     ).toThrow();
   });

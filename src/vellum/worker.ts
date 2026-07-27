@@ -87,10 +87,6 @@ import { createWorkerHost, type SendToParent } from "./worker-host.ts";
 
 import type { MeetingBotConfig } from "../config.ts";
 import { vellumJoinRejection } from "../meeting-platform.ts";
-import {
-  googleAccountMissingMessage,
-  hasGoogleAccountEnv,
-} from "./google-account-env.ts";
 
 /**
  * Google Meet URL shape (mirrors meet-join's `meet_join` tool validation).
@@ -319,13 +315,6 @@ async function main(): Promise<void> {
         const rejection = vellumJoinRejection(meetingUrl);
         if (rejection !== null) {
           return jsonResponse({ error: rejection }, 400);
-        }
-        // Meet denies anonymous automated clients outright, so the bot has
-        // to sign in. The daemon injects the account into this process's
-        // env at spawn (see `runtime.ts`); its absence is a configuration
-        // problem the caller can fix, not a transient failure.
-        if (!hasGoogleAccountEnv(process.env)) {
-          return jsonResponse({ error: googleAccountMissingMessage() }, 409);
         }
         const conversationId =
           typeof body.conversationId === "string" && body.conversationId.length > 0
