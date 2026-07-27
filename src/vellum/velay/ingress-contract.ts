@@ -10,15 +10,19 @@
  * convention rather than a per-integration one.
  */
 
+import { pluginWebhookPath } from "./gateway-manifest.ts";
+
 /**
  * Path the meeting provider dials to stream realtime events in.
  *
- * Lives under `/webhooks/` because Velay's platform-side allowlist already
- * admits that prefix (`^/webhooks/` in the gateway's
- * `VELAY_ALLOWED_PATHS`), so this route needs no allowlist change to be
- * reachable — see `gateway-manifest.ts` for the general case.
+ * Sits in the reserved plugin webhook namespace
+ * (`/webhooks/plugins/<plugin>/…`), which the gateway resolves dynamically
+ * from plugin config — see `gateway-manifest.ts`.
  */
-export const MEETING_BOT_REALTIME_PATH = "/webhooks/meeting-bot/realtime";
+export const MEETING_BOT_REALTIME_PATH = pluginWebhookPath(
+  "meeting-bot",
+  "realtime",
+);
 
 /**
  * Sentinel the plugin emits where the tunnel's public base URL belongs.
