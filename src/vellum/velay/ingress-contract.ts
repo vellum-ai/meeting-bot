@@ -1,43 +1,13 @@
 /**
- * Public-ingress contract for the meeting-bot realtime surface, routed
- * through **Velay** — the assistant platform's reverse tunnel.
+ * Public-ingress contract for the meeting-bot realtime surface, served
+ * through the gateway's Velay tunnel.
  *
- * ## What Velay actually is
- *
- * Velay is not a meeting service. The gateway holds one outbound WebSocket
- * to Velay (`velay-tunnel-v1`), Velay answers with a `registered` frame
- * carrying a public URL, and every inbound HTTP request or WebSocket
- * connection to that URL is framed down the tunnel and bridged to a
- * gateway route. It is the platform's own ingress: one public surface,
- * owned by the gateway, shared by every integration.
- *
- * ## Why this matters here
- *
- * The `recall` provider's realtime model is inbound — Recall dials a
- * `wss://` URL we expose and streams transcript/participant events into
- * it. Today the plugin satisfies that with `publicWsUrl`: the operator
- * stands up their own tunnel, pastes the address into config, and the
- * plugin guards it with `verificationToken`. That is a second, parallel
- * ingress next to the one the platform already runs.
- *
- * Velay removes it. The meeting-bot realtime endpoint becomes a gateway
- * route on the shared public surface, and the plugin stops owning a public
- * address entirely.
- *
- * ## The placeholder convention
- *
- * The plugin must hand Recall an absolute `wss://` URL at bot-creation
- * time — but it cannot know the tunnel's public URL (Velay assigns it at
- * registration, and it changes across restarts). So the plugin emits a
- * sentinel and the gateway substitutes the live value on the way out, the
- * same mechanism the Twilio path uses for TwiML
- * (`TWILIO_PUBLIC_BASE_URL_PLACEHOLDER` in
- * `packages/service-contracts/src/twilio-ingress.ts`, substituted in
- * `gateway/src/runtime/client.ts`).
- *
- * The sentinel string is deliberately identical to Twilio's: it is a
- * gateway-wide convention, not a per-integration one, so a single
- * substitution pass can serve every caller.
+ * The plugin must hand the meeting provider an absolute `wss://` URL, but
+ * cannot know the tunnel's public URL (Velay assigns it at registration
+ * and it changes across restarts). So the plugin emits a sentinel and the
+ * gateway substitutes the live value on the way out — the same mechanism
+ * TwiML uses, and the same sentinel string, since it is a gateway-wide
+ * convention rather than a per-integration one.
  */
 
 /**

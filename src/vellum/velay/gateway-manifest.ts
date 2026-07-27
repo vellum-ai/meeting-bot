@@ -57,23 +57,47 @@ export const IngressRouteKindSchema = z.enum(["http", "websocket"]);
 export type IngressRouteKind = z.infer<typeof IngressRouteKindSchema>;
 
 /**
- * How the gateway should authenticate an inbound request before
- * forwarding it.
+ * The plugin validates the request entirely on its own — a provider
+ * signature only it can check, say. The gateway still enforces the path
+ * allowlist.
+ */
+export const IngressAuthNoneSchema = z.object({
+  mode: z.literal("none"),
+});
+
+/**
+ * A shared secret arrives as a query parameter; the gateway compares it
+ * against the plugin's stored credential before forwarding. This is what
+ * the meeting-bot realtime socket needs — Recall can attach a query
+ * string to the endpoint URL but cannot sign requests or set headers.
  *
- * - `none` — the plugin validates entirely on its own (a provider
- *   signature it alone can check, say). The gateway still enforces the
- *   path allowlist.
- * - `query-token` — a shared secret arrives as a query parameter and the
- *   gateway compares it against the plugin's stored credential before
- *   forwarding. This is what the meeting-bot realtime socket needs:
- *   Recall can attach a query string to the endpoint URL but cannot sign
- *   requests or set headers.
+ * The plugin names its credential rather than handing the secret over,
+ * so the value stays in the store and is resolved by the gateway against
+ * the plugin's own credential scope.
+ */
+export const IngressAuthQueryTokenSchema = z.object({
+  mode: z.literal("query-token"),
+  credentialField: z.string().min(1),
+  /** Query parameter carrying the token. */
+  queryParam: z.string().min(1).default("token"),
+});
+
+/**
+ * How the gateway authenticates an inbound request before forwarding it.
  *
- * Deliberately a closed enum rather than free-form: a plugin declaring its
- * own auth scheme would put the gateway in the position of executing
+ * A discriminated union rather than a mode enum plus loose siblings: the
+ * fields a mode needs only exist on that mode, so "query-token with no
+ * credential field" — a route that looks authenticated but is not — is
+ * unrepresentable rather than something validation has to catch.
+ *
+ * The set of modes is closed on purpose. A plugin declaring its own
+ * scheme would put the gateway in the position of executing
  * plugin-supplied validation logic on unauthenticated traffic.
  */
-export const IngressAuthSchema = z.enum(["none", "query-token"]);
+export const IngressAuthSchema = z.discriminatedUnion("mode", [
+  IngressAuthNoneSchema,
+  IngressAuthQueryTokenSchema,
+]);
 export type IngressAuth = z.infer<typeof IngressAuthSchema>;
 
 /** One publicly reachable route a plugin is asking the gateway to expose. */
@@ -88,16 +112,7 @@ export const IngressRouteSchema = z.object({
     .min(1)
     .regex(/^\/[^?#\s]*$/, "path must be absolute and free of query/fragment"),
   kind: IngressRouteKindSchema,
-  auth: IngressAuthSchema.default("none"),
-  /**
-   * Credential field holding the shared secret, when `auth` is
-   * `query-token`. Resolved by the gateway against the plugin's own
-   * credential scope — the plugin never hands the secret over, only its
-   * name.
-   */
-  tokenCredentialField: z.string().min(1).optional(),
-  /** Query parameter carrying the token. Defaults to `token`. */
-  tokenQueryParam: z.string().min(1).default("token"),
+  auth: IngressAuthSchema.default({ mode: "none" }),
   /** Human-readable purpose, surfaced in gateway logs and admin UI. */
   description: z.string().min(1),
 });
@@ -114,21 +129,15 @@ export const PluginIngressManifestSchema = z.object({
 export type PluginIngressManifest = z.infer<typeof PluginIngressManifestSchema>;
 
 /**
- * Validate a manifest and reject the combinations the schema alone cannot
- * express — chiefly a `query-token` route with no credential field, which
- * would otherwise install an unauthenticated public route while looking
- * authenticated.
+ * Validate a manifest, including the one rule the schema cannot express:
+ * paths must be unique, since two routes claiming the same path would
+ * make the gateway's choice of handler arbitrary.
+ *
+ * Auth well-formedness is enforced by the schema itself — see
+ * {@link IngressAuthSchema}.
  */
 export function parseIngressManifest(raw: unknown): PluginIngressManifest {
   const manifest = PluginIngressManifestSchema.parse(raw);
-  for (const route of manifest.routes) {
-    if (route.auth === "query-token" && route.tokenCredentialField === undefined) {
-      throw new Error(
-        `ingress manifest for ${manifest.plugin}: route ${route.path} declares ` +
-          `auth "query-token" but no tokenCredentialField`,
-      );
-    }
-  }
   const seen = new Set<string>();
   for (const route of manifest.routes) {
     if (seen.has(route.path)) {
@@ -191,9 +200,11 @@ export const MEETING_BOT_INGRESS_MANIFEST: PluginIngressManifest =
       {
         path: "/webhooks/meeting-bot/realtime",
         kind: "websocket",
-        auth: "query-token",
-        tokenCredentialField: "realtime_token",
-        tokenQueryParam: "token",
+        auth: {
+          mode: "query-token",
+          credentialField: "realtime_token",
+          queryParam: "token",
+        },
         description:
           "Realtime event stream the meeting provider dials into (transcript, participant, and lifecycle events).",
       },
