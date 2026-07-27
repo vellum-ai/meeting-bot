@@ -61,6 +61,16 @@ const MEDIA_PROMPT_TIMEOUT_MS = 5_000;
  */
 const MEETING_ROOM_TIMEOUT_MS = 90_000;
 
+/**
+ * Cadence of page-state surveys while waiting out step 5. Meet can discard
+ * a knock server-side without any client-visible error (QA 2026-07: the
+ * host never saw the admit prompt; the tab sat "asking" for ~61s and was
+ * then bounced to the marketing page) — periodic surveys turn that silent
+ * window into logged ground truth ("Asking to be let in" vs "You can't
+ * join this call" vs something unexpected).
+ */
+const POST_KNOCK_SURVEY_INTERVAL_MS = 15_000;
+
 /** Options accepted by {@link runJoinFlow}. */
 export interface RunJoinFlowOptions {
   /** Full Meet join URL. Currently used only for diagnostic context. */
@@ -467,17 +477,38 @@ export async function runJoinFlow(opts: RunJoinFlowOptions): Promise<void> {
   // unsuitable because Meet renders it on the prejoin lobby as part of
   // the device-preview toolbar. See `INGAME_READY_INDICATOR` in
   // `dom/selectors.ts` for the full rationale.
-  try {
-    await waitForSelector(
-      selectors.INGAME_READY_INDICATOR,
-      MEETING_ROOM_TIMEOUT_MS,
-      doc,
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  // The wait is chunked (rather than a single 90s waitForSelector) so the
+  // window between knock and admission is observable: a survey is emitted
+  // every POST_KNOCK_SURVEY_INTERVAL_MS showing what the page displayed
+  // while nothing was resolving. When Meet silently drops a knock, these
+  // lines are the only client-side record of the 61s the bot spent
+  // "asking" — see the constant's doc comment.
+  let inMeeting = false;
+  const chunks = Math.ceil(
+    MEETING_ROOM_TIMEOUT_MS / POST_KNOCK_SURVEY_INTERVAL_MS,
+  );
+  for (let chunk = 1; chunk <= chunks && !inMeeting; chunk++) {
+    try {
+      await waitForSelector(
+        selectors.INGAME_READY_INDICATOR,
+        POST_KNOCK_SURVEY_INTERVAL_MS,
+        doc,
+      );
+      inMeeting = true;
+    } catch {
+      if (chunk < chunks) {
+        onEvent({
+          type: "diagnostic",
+          level: "info",
+          message: `meet-ext: still waiting for admission (~${Math.round((chunk * POST_KNOCK_SURVEY_INTERVAL_MS) / 1000)}s after the knock); ${surveyVisibleUi(doc)}`,
+        });
+      }
+    }
+  }
+  if (!inMeeting) {
     fail(
       onEvent,
-      `meet-ext: in-meeting UI did not appear within ${MEETING_ROOM_TIMEOUT_MS}ms (host may not have admitted the bot): ${msg}; ${surveyVisibleUi(doc)}`,
+      `meet-ext: in-meeting UI did not appear within ${MEETING_ROOM_TIMEOUT_MS}ms (host may not have admitted the bot, or Meet silently discarded the knock); ${surveyVisibleUi(doc)}`,
     );
   }
 
