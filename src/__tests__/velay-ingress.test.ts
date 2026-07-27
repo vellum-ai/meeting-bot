@@ -69,66 +69,49 @@ describe("plugin ingress manifest", () => {
     const route = MEETING_BOT_INGRESS_MANIFEST.routes[0]!;
     expect(route.path).toBe(MEETING_BOT_REALTIME_PATH);
     expect(route.kind).toBe("websocket");
-    expect(route.auth).toEqual({
-      mode: "query-token",
-      credentialField: "realtime_token",
-      queryParam: "token",
-    });
   });
 
-  test("defaults auth to none and queryParam to token", () => {
+  test("declares reach only — no auth fields in the manifest", () => {
+    // Authentication belongs to whoever minted the credential, not to the
+    // gateway. Keeping it out of the schema keeps the forward-compat
+    // surface minimal.
+    const route = MEETING_BOT_INGRESS_MANIFEST.routes[0]! as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(route).sort()).toEqual([
+      "description",
+      "kind",
+      "path",
+    ]);
+  });
+
+  test("strips unknown fields rather than carrying them through", () => {
     const manifest = parseIngressManifest({
       version: 1,
       plugin: "p",
       routes: [
-        { path: "/webhooks/a", kind: "http", description: "d" },
         {
-          path: "/webhooks/b",
-          kind: "websocket",
-          auth: { mode: "query-token", credentialField: "tok" },
+          path: "/webhooks/p",
+          kind: "http",
           description: "d",
+          auth: { mode: "query-token", credentialField: "tok" },
         },
       ],
     });
-    expect(manifest.routes[0]!.auth).toEqual({ mode: "none" });
-    const auth = manifest.routes[1]!.auth;
-    expect(auth.mode).toBe("query-token");
-    if (auth.mode === "query-token") expect(auth.queryParam).toBe("token");
+    expect(manifest.routes[0]).not.toHaveProperty("auth");
   });
 
-  test("rejects a query-token auth carrying no credential field", () => {
-    // The union makes this unrepresentable rather than a runtime check.
+  test("rejects a path with a trailing slash", () => {
+    // Velay runs path.Clean before matching, which strips trailing
+    // slashes — a pattern derived from `/foo/` could never match.
     expect(() =>
       parseIngressManifest({
         version: 1,
         plugin: "p",
-        routes: [
-          {
-            path: "/webhooks/p",
-            kind: "websocket",
-            auth: { mode: "query-token" },
-            description: "d",
-          },
-        ],
+        routes: [{ path: "/webhooks/p/", kind: "http", description: "d" }],
       }),
-    ).toThrow();
-  });
-
-  test("rejects an unknown auth mode", () => {
-    expect(() =>
-      parseIngressManifest({
-        version: 1,
-        plugin: "p",
-        routes: [
-          {
-            path: "/webhooks/p",
-            kind: "http",
-            auth: { mode: "hmac", secret: "s" },
-            description: "d",
-          },
-        ],
-      }),
-    ).toThrow();
+    ).toThrow(/trailing slash/);
   });
 
   test("derives an exactly-anchored RE2 pattern per route", () => {
