@@ -15,9 +15,11 @@ import {
 } from "../vellum/velay/ingress-contract.ts";
 import {
   MEETING_BOT_INGRESS_MANIFEST,
-  mergeVelayAllowedPaths,
+  PLUGIN_WEBHOOK_ALLOWED_PATH,
+  ingressManifestDigest,
+  ingressRoutePaths,
   parseIngressManifest,
-  toVelayAllowedPaths,
+  pluginWebhookPath,
 } from "../vellum/velay/gateway-manifest.ts";
 
 describe("ingress contract", () => {
@@ -67,8 +69,12 @@ describe("plugin ingress manifest", () => {
   test("meeting-bot's manifest declares the realtime socket", () => {
     expect(MEETING_BOT_INGRESS_MANIFEST.plugin).toBe("meeting-bot");
     const route = MEETING_BOT_INGRESS_MANIFEST.routes[0]!;
-    expect(route.path).toBe(MEETING_BOT_REALTIME_PATH);
+    // The manifest names only the subpath; the gateway composes the rest.
+    expect(route.subpath).toBe("realtime");
     expect(route.kind).toBe("websocket");
+    expect(ingressRoutePaths(MEETING_BOT_INGRESS_MANIFEST)).toEqual([
+      MEETING_BOT_REALTIME_PATH,
+    ]);
   });
 
   test("declares reach only — no auth fields in the manifest", () => {
@@ -82,7 +88,7 @@ describe("plugin ingress manifest", () => {
     expect(Object.keys(route).sort()).toEqual([
       "description",
       "kind",
-      "path",
+      "subpath",
     ]);
   });
 
@@ -92,7 +98,7 @@ describe("plugin ingress manifest", () => {
       plugin: "p",
       routes: [
         {
-          path: "/webhooks/p",
+          subpath: "hook",
           kind: "http",
           description: "d",
           auth: { mode: "query-token", credentialField: "tok" },
@@ -109,48 +115,108 @@ describe("plugin ingress manifest", () => {
       parseIngressManifest({
         version: 1,
         plugin: "p",
-        routes: [{ path: "/webhooks/p/", kind: "http", description: "d" }],
+        routes: [{ subpath: "hook/", kind: "http", description: "d" }],
       }),
     ).toThrow(/trailing slash/);
   });
 
-  test("derives an exactly-anchored RE2 pattern per route", () => {
-    expect(toVelayAllowedPaths(MEETING_BOT_INGRESS_MANIFEST)).toEqual([
-      "^/webhooks/meeting-bot/realtime$",
-    ]);
+  test("one static prefix covers every plugin webhook", () => {
+    // The allowlist never changes as plugins come and go, and a plugin
+    // cannot widen the tunnel beyond a prefix that is already open.
+    const re = new RegExp(PLUGIN_WEBHOOK_ALLOWED_PATH);
+    for (const path of ingressRoutePaths(MEETING_BOT_INGRESS_MANIFEST)) {
+      expect(re.test(path)).toBe(true);
+    }
+    expect(re.test("/webhooks/twilio/voice")).toBe(false);
+    expect(re.test("/v1/live-voice")).toBe(false);
   });
 
-  test("escapes regex metacharacters in paths", () => {
+  test("pluginWebhookPath builds inside the reserved namespace", () => {
+    expect(pluginWebhookPath("acme", "hook")).toBe(
+      "/webhooks/plugins/acme/hook",
+    );
+    // A leading slash on the subpath must not double up.
+    expect(pluginWebhookPath("acme", "/hook")).toBe(
+      "/webhooks/plugins/acme/hook",
+    );
+  });
+
+  test("a route cannot address another plugin — it names only a subpath", () => {
+    // Cross-plugin interception is unrepresentable: whatever "evil"
+    // declares composes under evil's own namespace.
     const manifest = parseIngressManifest({
       version: 1,
-      plugin: "p",
-      routes: [
-        { path: "/webhooks/a.b+c", kind: "http", description: "d" },
-      ],
+      plugin: "evil",
+      routes: [{ subpath: "realtime", kind: "websocket", description: "d" }],
     });
-    const [pattern] = toVelayAllowedPaths(manifest);
-    // The derived pattern must match the literal path and nothing adjacent.
-    const re = new RegExp(pattern!);
-    expect(re.test("/webhooks/a.b+c")).toBe(true);
-    expect(re.test("/webhooks/axbxc")).toBe(false);
-    expect(re.test("/webhooks/a.b+c/extra")).toBe(false);
+    expect(ingressRoutePaths(manifest)).toEqual([
+      "/webhooks/plugins/evil/realtime",
+    ]);
   });
 
-  test("merges and de-duplicates across plugins", () => {
-    const other = parseIngressManifest({
-      version: 1,
-      plugin: "other",
-      routes: [{ path: "/webhooks/other", kind: "http", description: "d" }],
-    });
-    const merged = mergeVelayAllowedPaths([
-      MEETING_BOT_INGRESS_MANIFEST,
-      other,
-      MEETING_BOT_INGRESS_MANIFEST,
-    ]);
-    expect(merged.length).toBe(2);
-    expect(new Set(merged).size).toBe(2);
-    // Sorted for a deterministic comparison in the gateway's guard test.
-    expect([...merged].sort()).toEqual(merged);
+  test("rejects an absolute subpath", () => {
+    expect(() =>
+      parseIngressManifest({
+        version: 1,
+        plugin: "p",
+        routes: [{ subpath: "/hook", kind: "http", description: "d" }],
+      }),
+    ).toThrow();
+  });
+
+  test("rejects traversal segments that would escape the namespace", () => {
+    // Velay runs path.Clean before matching, so `../other/steal` would
+    // otherwise resolve outside the declaring plugin's namespace.
+    for (const subpath of ["../other/steal", "a/../../b", "./hook"]) {
+      expect(() =>
+        parseIngressManifest({
+          version: 1,
+          plugin: "p",
+          routes: [{ subpath, kind: "http", description: "d" }],
+        }),
+      ).toThrow();
+    }
+  });
+
+  test("the approval digest tracks reach, not prose", () => {
+    const base = {
+      version: 1 as const,
+      plugin: "p",
+      routes: [
+        { subpath: "a", kind: "http" as const, description: "one" },
+      ],
+    };
+    const original = ingressManifestDigest(parseIngressManifest(base));
+
+    // Rewording a description must not invalidate an approval.
+    const reworded = ingressManifestDigest(
+      parseIngressManifest({
+        ...base,
+        routes: [{ ...base.routes[0]!, description: "reworded" }],
+      }),
+    );
+    expect(reworded).toBe(original);
+
+    // Adding reach must.
+    const widened = ingressManifestDigest(
+      parseIngressManifest({
+        ...base,
+        routes: [
+          base.routes[0]!,
+          { subpath: "b", kind: "http" as const, description: "two" },
+        ],
+      }),
+    );
+    expect(widened).not.toBe(original);
+
+    // As must changing a path's transport.
+    const retyped = ingressManifestDigest(
+      parseIngressManifest({
+        ...base,
+        routes: [{ ...base.routes[0]!, kind: "websocket" as const }],
+      }),
+    );
+    expect(retyped).not.toBe(original);
   });
 
   test("rejects duplicate paths", () => {
@@ -159,20 +225,20 @@ describe("plugin ingress manifest", () => {
         version: 1,
         plugin: "p",
         routes: [
-          { path: "/webhooks/p", kind: "http", description: "one" },
-          { path: "/webhooks/p", kind: "http", description: "two" },
+          { subpath: "hook", kind: "http", description: "one" },
+          { subpath: "hook", kind: "http", description: "two" },
         ],
       }),
     ).toThrow(/duplicate route/);
   });
 
-  test("rejects relative paths and embedded query strings", () => {
-    for (const path of ["webhooks/p", "/webhooks/p?x=1", "/webhooks/p#f"]) {
+  test("rejects embedded query strings and fragments", () => {
+    for (const subpath of ["hook?x=1", "hook#f"]) {
       expect(() =>
         parseIngressManifest({
           version: 1,
           plugin: "p",
-          routes: [{ path, kind: "http", description: "d" }],
+          routes: [{ subpath, kind: "http", description: "d" }],
         }),
       ).toThrow();
     }
@@ -183,7 +249,7 @@ describe("plugin ingress manifest", () => {
       parseIngressManifest({
         version: 2,
         plugin: "p",
-        routes: [{ path: "/webhooks/p", kind: "http", description: "d" }],
+        routes: [{ subpath: "hook", kind: "http", description: "d" }],
       }),
     ).toThrow();
   });
