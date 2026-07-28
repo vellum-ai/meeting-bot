@@ -86,20 +86,32 @@ export type IngressRouteKind = z.infer<typeof IngressRouteKindSchema>;
  */
 export const IngressRouteSchema = z.object({
   /**
-   * Absolute public path, exactly as the external caller will request it.
-   * Must start with `/` and carry no query string — the query is runtime
-   * data, not part of the route identity.
+   * Path **relative to the plugin's own namespace** — `"realtime"`, not
+   * `/webhooks/plugins/meeting-bot/realtime`. The gateway composes the
+   * absolute path from the plugin name and this subpath.
    *
-   * No trailing slash: Velay runs `path.Clean` on the inbound path before
-   * matching, which strips trailing slashes, so a pattern derived from
-   * `/foo/` could never match anything.
+   * A plugin therefore cannot name another plugin's route: cross-plugin
+   * interception is unrepresentable rather than something validation has
+   * to catch. The only way back out of the namespace would be traversal,
+   * which is why `.` and `..` segments are rejected — Velay runs
+   * `path.Clean` before matching, so `../other/steal` would otherwise
+   * resolve outside the declaring plugin's namespace.
+   *
+   * No leading or trailing slash: `path.Clean` strips trailing slashes,
+   * so a composed path ending in one could never match.
    */
-  path: z
+  subpath: z
     .string()
     .min(1)
-    .regex(/^\/[^?#\s]*$/, "path must be absolute and free of query/fragment")
-    .refine((p) => p === "/" || !p.endsWith("/"), {
-      message: "path must not end in a trailing slash",
+    .regex(
+      /^[^/?#\s][^?#\s]*$/,
+      "subpath must be relative (no leading slash) and free of query/fragment",
+    )
+    .refine((p) => !p.endsWith("/"), {
+      message: "subpath must not end in a trailing slash",
+    })
+    .refine((p) => !p.split("/").some((seg) => seg === "." || seg === ".."), {
+      message: "subpath must not contain . or .. segments",
     }),
   kind: IngressRouteKindSchema,
   /** Human-readable purpose, surfaced in gateway logs and admin UI. */
@@ -121,47 +133,48 @@ export type PluginIngressManifest = z.infer<typeof PluginIngressManifestSchema>;
 export const PLUGIN_WEBHOOK_PREFIX = "/webhooks/plugins";
 
 /**
- * Build the public path for a plugin webhook. Use this rather than
- * hand-writing the prefix, so the namespace lives in one place.
+ * Compose the absolute public path the gateway serves for a declared
+ * route. The prefix lives here and nowhere else.
+ *
+ * This is the gateway's job in production. It is exported because the
+ * plugin still has to hand Recall an absolute callback URL today — once
+ * the platform meeting service issues that URL from the assistant's
+ * identity, the plugin stops composing paths at all and this becomes
+ * gateway-internal.
  */
 export function pluginWebhookPath(plugin: string, subpath: string): string {
-  const tail = subpath.replace(/^\/+/, "");
-  return `${PLUGIN_WEBHOOK_PREFIX}/${plugin}/${tail}`;
+  // The schema already rejects a leading slash, but this is exported and
+  // called directly for URL building — normalize rather than emit `//`.
+  return `${PLUGIN_WEBHOOK_PREFIX}/${plugin}/${subpath.replace(/^\/+/, "")}`;
 }
 
-/** The namespace a given plugin owns, with its trailing separator. */
-function namespaceFor(plugin: string): string {
-  return `${PLUGIN_WEBHOOK_PREFIX}/${plugin}/`;
+/** Absolute paths the gateway should serve for a manifest, in declared order. */
+export function ingressRoutePaths(
+  manifest: PluginIngressManifest,
+): string[] {
+  return manifest.routes.map((route) =>
+    pluginWebhookPath(manifest.plugin, route.subpath),
+  );
 }
 
 /**
- * Validate a manifest, including the two rules the schema cannot express.
+ * Validate a manifest, including the rule the schema cannot express:
+ * subpaths must be unique, since two routes composing to the same
+ * absolute path would make the gateway's choice of handler arbitrary.
  *
- * 1. **Namespace ownership.** Every path must sit under the declaring
- *    plugin's own `/webhooks/plugins/<plugin>/` namespace. Without this a
- *    plugin could declare a path belonging to another plugin and quietly
- *    intercept its webhooks — the whole point of a shared prefix is that
- *    the prefix alone no longer distinguishes who owns what.
- * 2. **Unique paths**, since two routes claiming the same path would make
- *    the gateway's choice of handler arbitrary.
+ * Namespace ownership needs no check — a route names only its subpath, so
+ * it can never address another plugin.
  */
 export function parseIngressManifest(raw: unknown): PluginIngressManifest {
   const manifest = PluginIngressManifestSchema.parse(raw);
-  const namespace = namespaceFor(manifest.plugin);
   const seen = new Set<string>();
   for (const route of manifest.routes) {
-    if (!route.path.startsWith(namespace)) {
+    if (seen.has(route.subpath)) {
       throw new Error(
-        `ingress manifest for ${manifest.plugin}: route ${route.path} is ` +
-          `outside the plugin's namespace ${namespace}`,
+        `ingress manifest for ${manifest.plugin}: duplicate route ${route.subpath}`,
       );
     }
-    if (seen.has(route.path)) {
-      throw new Error(
-        `ingress manifest for ${manifest.plugin}: duplicate route ${route.path}`,
-      );
-    }
-    seen.add(route.path);
+    seen.add(route.subpath);
   }
   return manifest;
 }
@@ -200,7 +213,7 @@ export function ingressManifestDigest(
     `v${manifest.version}`,
     manifest.plugin,
     ...manifest.routes
-      .map((r) => `${r.kind} ${r.path}`)
+      .map((r) => `${r.kind} ${r.subpath}`)
       .slice()
       .sort(),
   ].join("\n");
@@ -225,7 +238,7 @@ export const MEETING_BOT_INGRESS_MANIFEST: PluginIngressManifest =
     plugin: "meeting-bot",
     routes: [
       {
-        path: pluginWebhookPath("meeting-bot", "realtime"),
+        subpath: "realtime",
         kind: "websocket",
         description:
           "Realtime event stream the meeting provider dials into (transcript, participant, and lifecycle events).",
