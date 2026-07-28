@@ -1,67 +1,37 @@
 /**
- * Declarative ingress manifest: the JSON a plugin publishes so the gateway
- * can expose its public routes through Velay **without knowing what the
- * plugin is**.
+ * Schema for `channels/ingress.json` — the static declaration of which
+ * public routes this plugin needs the gateway to expose through Velay.
  *
- * ## The problem this solves
+ * ## Why a JSON file rather than code
  *
- * Today the gateway's public surface is entirely hand-written. Every
- * externally-reachable route is a bespoke handler, and the Velay path
- * allowlist is a frozen literal:
+ * The gateway reads this off the assistant's workspace volume. It must
+ * never execute assistant-supplied code to discover routes, so the
+ * declaration is inert data: a top-level `channels/ingress.json` the
+ * gateway can read and validate without running anything.
  *
- *     // gateway/src/velay/allowed-paths.ts
- *     export const VELAY_ALLOWED_PATHS = Object.freeze([
- *       "^/webhooks/", "^/v1/audio/", "^/v1/live-voice$", ...
- *     ]);
+ * ## Why the gateway needs it
  *
- * with a guard test enforcing symmetry against the gateway's route table.
- * That works because Twilio, Telegram, and the rest are all first-party:
- * someone edits the gateway when they add one. A plugin cannot do that —
- * it ships separately from the gateway and cannot patch a frozen array.
+ * The gateway's public surface is hand-written today, and the Velay path
+ * allowlist is a frozen literal with a guard test enforcing symmetry
+ * against the route table. That works for first-party integrations —
+ * someone edits the gateway when they add one — but a plugin ships
+ * separately and cannot patch a frozen array. Without a declaration, a
+ * plugin needing inbound traffic has no route to the public surface at
+ * all, which is exactly why meeting-bot ended up standing up its own
+ * tunnel (`publicWsUrl` + `verificationToken`).
  *
- * So a plugin that needs inbound traffic (meeting-bot is the first, but
- * any webhook-receiving plugin is the same shape) currently has no route
- * to the public surface at all. It has to stand up its own tunnel, which
- * is exactly the `publicWsUrl` + `verificationToken` duplication the
- * Velay move is meant to delete.
+ * ## What this file does NOT decide
  *
- * ## The shape
- *
- * Every plugin webhook lives under a single reserved namespace:
- *
- *     /webhooks/plugins/<plugin>/<subpath>
- *
- * That one decision does most of the work. The Velay allowlist gains
- * exactly one static prefix entry ({@link PLUGIN_WEBHOOK_ALLOWED_PATH}) that
- * covers every plugin forever — no per-plugin allowlist mutation, no
- * churn in the gateway's route-table guard test, and no way for a plugin
- * to widen the public surface beyond the namespace. The gateway resolves
- * `<plugin>` from the path, reads that plugin's manifest from the
- * assistant workspace volume (which it can already read), and forwards to
- * the plugin's own route surface.
- *
- * The gateway therefore needs no meeting-bot-specific code, and adding a
- * second inbound plugin costs nothing.
- *
- * ## Approval
- *
- * A manifest is a *request*, never a grant. An assistant must not be able
- * to open arbitrary public webhooks by writing a file, so the gateway
- * serves the intersection of what a plugin declares and what a guardian
- * has approved. Approval is keyed on {@link ingressManifestDigest} rather
- * than the plugin name, so editing a manifest after approval invalidates
- * it — otherwise a plugin could be approved for one path and then swap in
- * another.
- *
- * ## Status
- *
- * Proposal. Nothing in the gateway reads this yet; the schema and the
- * meeting-bot instance live here so the shape can be reviewed against a
- * real consumer before it is built into
- * `vellum-assistant` / `vellum-assistant-platform`.
+ * Only reach: "expose this path and deliver it to me." Everything about
+ * how that is honoured belongs to the gateway and is deliberately absent
+ * here — the absolute path (composed from the plugin's own name), the
+ * Velay allowlist pattern, authentication, and whether a guardian has
+ * approved the request at all. A declaration is a request, never a grant.
  */
 
 import { z } from "zod";
+
+import ingressJson from "../../../channels/ingress.json" with { type: "json" };
 
 /**
  * Transport a declared route expects. The gateway bridges HTTP and
@@ -72,46 +42,35 @@ import { z } from "zod";
 export const IngressRouteKindSchema = z.enum(["http", "websocket"]);
 export type IngressRouteKind = z.infer<typeof IngressRouteKindSchema>;
 
-/**
- * One publicly reachable route a plugin is asking the gateway to expose.
- *
- * Note what is *not* here: authentication. The manifest declares reach —
- * "this path should survive the allowlist and arrive at my handler" — and
- * nothing else. Authenticating the caller stays with whoever mints the
- * credential: the route handler, or the platform service that issued the
- * callback URL in the first place. Keeping auth out means the gateway
- * never runs plugin-directed validation logic, and it keeps this schema
- * (a forward-compatibility commitment, once plugins depend on it) as
- * small as it can be.
- */
+/** One publicly reachable route this plugin is asking the gateway to expose. */
 export const IngressRouteSchema = z.object({
   /**
-   * Path **relative to the plugin's own namespace** — `"realtime"`, not
-   * `/webhooks/plugins/meeting-bot/realtime`. The gateway composes the
-   * absolute path from the plugin name and this subpath.
+   * Path **relative to this plugin's own namespace** — `"realtime"`, not
+   * `/webhooks/plugins/meeting-bot/realtime`. The gateway owns the prefix
+   * and composes the absolute path from the plugin's name.
    *
    * A plugin therefore cannot name another plugin's route: cross-plugin
    * interception is unrepresentable rather than something validation has
-   * to catch. The only way back out of the namespace would be traversal,
-   * which is why `.` and `..` segments are rejected — Velay runs
-   * `path.Clean` before matching, so `../other/steal` would otherwise
-   * resolve outside the declaring plugin's namespace.
+   * to catch. The only way back out would be traversal, which is why `.`
+   * and `..` segments are rejected — Velay runs `path.Clean` before
+   * matching, so `../other/steal` would otherwise resolve outside this
+   * plugin's namespace.
    *
    * No leading or trailing slash: `path.Clean` strips trailing slashes,
    * so a composed path ending in one could never match.
    */
-  subpath: z
+  path: z
     .string()
     .min(1)
     .regex(
       /^[^/?#\s][^?#\s]*$/,
-      "subpath must be relative (no leading slash) and free of query/fragment",
+      "path must be relative (no leading slash) and free of query/fragment",
     )
     .refine((p) => !p.endsWith("/"), {
-      message: "subpath must not end in a trailing slash",
+      message: "path must not end in a trailing slash",
     })
     .refine((p) => !p.split("/").some((seg) => seg === "." || seg === ".."), {
-      message: "subpath must not contain . or .. segments",
+      message: "path must not contain . or .. segments",
     }),
   kind: IngressRouteKindSchema,
   /** Human-readable purpose, surfaced in gateway logs and admin UI. */
@@ -119,129 +78,67 @@ export const IngressRouteSchema = z.object({
 });
 export type IngressRoute = z.infer<typeof IngressRouteSchema>;
 
-/** Everything one plugin declares about its public surface. */
-export const PluginIngressManifestSchema = z.object({
-  /** Manifest format version, so the gateway can reject what it can't parse. */
-  version: z.literal(1),
-  /** Plugin name; must match the installed plugin's manifest name. */
-  plugin: z.string().min(1),
+/**
+ * The whole declaration.
+ *
+ * No version and no plugin name: the manifest format is the assistant's,
+ * not something this plugin versions independently, and the plugin's
+ * identity is already known from where the file was read.
+ */
+export const IngressManifestSchema = z.object({
   routes: z.array(IngressRouteSchema).min(1),
 });
-export type PluginIngressManifest = z.infer<typeof PluginIngressManifestSchema>;
-
-/** Reserved namespace prefix every plugin webhook must sit under. */
-export const PLUGIN_WEBHOOK_PREFIX = "/webhooks/plugins";
+export type IngressManifest = z.infer<typeof IngressManifestSchema>;
 
 /**
- * Compose the absolute public path the gateway serves for a declared
- * route. The prefix lives here and nowhere else.
- *
- * This is the gateway's job in production. It is exported because the
- * plugin still has to hand Recall an absolute callback URL today — once
- * the platform meeting service issues that URL from the assistant's
- * identity, the plugin stops composing paths at all and this becomes
- * gateway-internal.
+ * Validate a declaration, including the rule the schema cannot express:
+ * paths must be unique, since two routes composing to the same absolute
+ * path would make the gateway's choice of handler arbitrary.
  */
-export function pluginWebhookPath(plugin: string, subpath: string): string {
-  // The schema already rejects a leading slash, but this is exported and
-  // called directly for URL building — normalize rather than emit `//`.
-  return `${PLUGIN_WEBHOOK_PREFIX}/${plugin}/${subpath.replace(/^\/+/, "")}`;
-}
-
-/** Absolute paths the gateway should serve for a manifest, in declared order. */
-export function ingressRoutePaths(
-  manifest: PluginIngressManifest,
-): string[] {
-  return manifest.routes.map((route) =>
-    pluginWebhookPath(manifest.plugin, route.subpath),
-  );
-}
-
-/**
- * Validate a manifest, including the rule the schema cannot express:
- * subpaths must be unique, since two routes composing to the same
- * absolute path would make the gateway's choice of handler arbitrary.
- *
- * Namespace ownership needs no check — a route names only its subpath, so
- * it can never address another plugin.
- */
-export function parseIngressManifest(raw: unknown): PluginIngressManifest {
-  const manifest = PluginIngressManifestSchema.parse(raw);
+export function parseIngressManifest(raw: unknown): IngressManifest {
+  const manifest = IngressManifestSchema.parse(raw);
   const seen = new Set<string>();
   for (const route of manifest.routes) {
-    if (seen.has(route.subpath)) {
-      throw new Error(
-        `ingress manifest for ${manifest.plugin}: duplicate route ${route.subpath}`,
-      );
+    if (seen.has(route.path)) {
+      throw new Error(`ingress manifest: duplicate route ${route.path}`);
     }
-    seen.add(route.subpath);
+    seen.add(route.path);
   }
   return manifest;
 }
 
-/**
- * The single Velay allowlist entry that covers every plugin webhook,
- * forever. A Go RE2 prefix pattern, matching the existing `^/webhooks/`
- * style in the gateway's `VELAY_ALLOWED_PATHS`.
- *
- * Because the namespace is reserved and every declared path is validated
- * to sit inside it, the allowlist never has to change as plugins come and
- * go — which also means a plugin can never widen the tunnel's public
- * surface, only claim a path within a prefix that is already open.
- */
-export const PLUGIN_WEBHOOK_ALLOWED_PATH = "^/webhooks/plugins/";
+/** Reserved namespace every plugin webhook is composed under. */
+export const PLUGIN_WEBHOOK_PREFIX = "/webhooks/plugins";
 
 /**
- * Stable digest of what a manifest actually asks for.
+ * Compose the absolute public path the gateway serves for a declared
+ * route.
  *
- * Guardian approval is keyed on this rather than on the plugin name, so a
- * manifest edited after approval no longer matches and has to be
- * re-approved. Only the fields that affect reach are hashed — a
- * `description` reword should not invalidate a grant.
- *
- * Deliberately dependency-free (djb2 over a canonical string) so the
- * gateway, the guardian UI, and the plugin can all compute it identically
- * without agreeing on a crypto library. Swap in SHA-256 if this ever
- * needs to resist a deliberate collision; today it guards against drift,
- * not attack, because the manifest is already read from a volume only the
- * assistant can write.
+ * This is the gateway's job in production. It is exported only because
+ * the plugin still has to hand Recall an absolute callback URL today;
+ * once the platform meeting service issues that URL from the assistant's
+ * identity, the plugin stops composing paths at all.
  */
-export function ingressManifestDigest(
-  manifest: PluginIngressManifest,
-): string {
-  const canonical = [
-    `v${manifest.version}`,
-    manifest.plugin,
-    ...manifest.routes
-      .map((r) => `${r.kind} ${r.subpath}`)
-      .slice()
-      .sort(),
-  ].join("\n");
-  let hash = 5381;
-  for (let i = 0; i < canonical.length; i++) {
-    hash = ((hash << 5) + hash + canonical.charCodeAt(i)) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
+export function pluginWebhookPath(plugin: string, path: string): string {
+  // The schema already rejects a leading slash, but this is exported and
+  // called directly for URL building — normalize rather than emit `//`.
+  return `${PLUGIN_WEBHOOK_PREFIX}/${plugin}/${path.replace(/^\/+/, "")}`;
+}
+
+/** Absolute paths the gateway would serve for `manifest`, in declared order. */
+export function ingressRoutePaths(
+  manifest: IngressManifest,
+  plugin: string,
+): string[] {
+  return manifest.routes.map((route) => pluginWebhookPath(plugin, route.path));
 }
 
 /**
- * meeting-bot's declaration.
+ * This plugin's declaration, parsed from `channels/ingress.json`.
  *
- * One route: the realtime socket the meeting provider dials into. The
- * token Recall carries on that URL is validated by whoever minted it —
- * the plugin today, the platform meeting service once it issues the
- * callback URL — not by the gateway.
+ * Imported from the shipped JSON rather than restated in TypeScript, so
+ * the file the gateway reads is the same one the tests validate — a
+ * malformed declaration fails CI instead of failing at gateway load.
  */
-export const MEETING_BOT_INGRESS_MANIFEST: PluginIngressManifest =
-  parseIngressManifest({
-    version: 1,
-    plugin: "meeting-bot",
-    routes: [
-      {
-        subpath: "realtime",
-        kind: "websocket",
-        description:
-          "Realtime event stream the meeting provider dials into (transcript, participant, and lifecycle events).",
-      },
-    ],
-  });
+export const MEETING_BOT_INGRESS_MANIFEST: IngressManifest =
+  parseIngressManifest(ingressJson);

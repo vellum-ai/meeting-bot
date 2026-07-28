@@ -1,0 +1,9 @@
+{
+  "routes": [
+    {
+      "path": "realtime",
+      "kind": "websocket",
+      "description": "Realtime event stream the meeting provider dials into (transcript, participant, and lifecycle events)."
+    }
+  ]
+}
