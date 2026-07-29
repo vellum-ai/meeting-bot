@@ -186,6 +186,10 @@ export async function handleJoinPost(request: Request): Promise<Response> {
  * provider runtime is torn down and the new one spun up immediately (see
  * `restartProviderRuntime`). Posting the currently active provider is a
  * supported way to bounce the runtime in place.
+ *
+ * The response carries `note` plus `noteUsable`: a switch can succeed and still
+ * leave the plugin unable to join (recall with no reachable callback URL), and
+ * the app keeps that note on screen rather than fading it.
  */
 export async function handleProviderPost(request: Request): Promise<Response> {
   let raw: unknown;
@@ -204,8 +208,8 @@ export async function handleProviderPost(request: Request): Promise<Response> {
   }
 
   const view = applyProviderChange(pluginConfigPath(), parsed.data);
-  const note = await restartProviderRuntime();
-  return json({ ...view, note });
+  const { note, usable } = await restartProviderRuntime();
+  return json({ ...view, note, noteUsable: usable });
 }
 
 /**

@@ -240,21 +240,11 @@ export async function resolveApiKey(): Promise<string> {
 }
 
 /**
- * Build the realtime endpoint URL handed to Recall in the Create-Bot request.
- *
- * Recall connects to this exact URL, query string included. Per the Recall
- * docs, a trailing `/` must precede any query parameters or the request is
- * rejected with HTTP 400 — so the token (when present) is appended after a
- * normalized trailing slash.
+ * Re-exported from `recall-requests.ts`, which the standalone skill scripts can
+ * import (this module cannot: zod and plugin-api). One implementation, so a
+ * dashboard-initiated join and a skill-initiated join hand Recall the same URL.
  */
-export function realtimeEndpointUrl(config: MeetingBotConfig): string {
-  if (!config.publicWsUrl) {
-    throw new Error(
-      "meeting-bot: publicWsUrl is not set. The init hook should have provisioned a tunnel — this likely means setupInbound failed or was skipped.",
-    );
-  }
-  const base = config.publicWsUrl.replace(/\/+$/, "");
-  const withSlash = `${base}/`;
-  if (!config.verificationToken) return withSlash;
-  return `${withSlash}?token=${encodeURIComponent(config.verificationToken)}`;
-}
+export {
+  MissingPublicWsUrlError,
+  realtimeEndpointUrl,
+} from "./recall-requests.ts";

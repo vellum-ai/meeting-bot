@@ -21,8 +21,11 @@ function fakeFetch(
     Promise.resolve(handler(String(url), init as RequestInit))) as typeof fetch;
 }
 
-function useProvider(provider: "recall" | "vellum"): void {
-  const { config } = resolveConfig({ provider });
+function useProvider(
+  provider: "recall" | "vellum",
+  overrides: Record<string, unknown> = {},
+): void {
+  const { config } = resolveConfig({ provider, ...overrides });
   setResolvedConfig(config);
 }
 
@@ -85,8 +88,27 @@ describe("startJoinFromApp (vellum)", () => {
 });
 
 describe("startJoinFromApp (recall)", () => {
-  test("maps a missing API key to a 409 before any network call", async () => {
+  test("refuses with a 409 when there is no reachable callback URL", async () => {
+    // The state a lost or reset config lands in: provider back to its "recall"
+    // default with no publicWsUrl and no tunnel. Recall would have nowhere to
+    // stream events, so no bot is created — and the message has to name the
+    // fix, since this is what an operator sees after a provider switch.
     useProvider("recall");
+    let fetched = false;
+    const err = await startJoinFromApp("https://meet.google.com/abc", {
+      fetchImpl: fakeFetch(() => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      }),
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(JoinRequestError);
+    expect((err as JoinRequestError).status).toBe(409);
+    expect((err as JoinRequestError).message).toContain("publicWsUrl");
+    expect(fetched).toBe(false);
+  });
+
+  test("maps a missing API key to a 409 before any network call", async () => {
+    useProvider("recall", { publicWsUrl: "wss://tunnel.example" });
     let fetched = false;
     const err = await startJoinFromApp("https://meet.google.com/abc", {
       fetchImpl: fakeFetch(() => {

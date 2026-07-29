@@ -7,7 +7,9 @@ import { describe, expect, test } from "bun:test";
 
 import {
   buildCreateBotBody,
+  MissingPublicWsUrlError,
   REALTIME_EVENTS,
+  realtimeEndpointUrl,
   recallAuthHeaders,
 } from "../recall-requests.ts";
 
@@ -67,6 +69,51 @@ describe("buildCreateBotBody", () => {
       botName: "Ada",
     });
     expect(body.bot_name).toBe("Ada");
+  });
+});
+
+describe("realtimeEndpointUrl", () => {
+  test("normalizes to exactly one trailing slash", () => {
+    // Recall rejects the create-bot request with a 400 unless the path ends in
+    // a slash before any query string.
+    expect(realtimeEndpointUrl({ publicWsUrl: "wss://t.example" })).toBe(
+      "wss://t.example/",
+    );
+    expect(realtimeEndpointUrl({ publicWsUrl: "wss://t.example///" })).toBe(
+      "wss://t.example/",
+    );
+  });
+
+  test("appends the verification token after the slash", () => {
+    expect(
+      realtimeEndpointUrl({
+        publicWsUrl: "wss://t.example",
+        verificationToken: "a b/c",
+      }),
+    ).toBe("wss://t.example/?token=a%20b%2Fc");
+  });
+
+  test("omits the query string when no token is configured", () => {
+    expect(
+      realtimeEndpointUrl({ publicWsUrl: "wss://t.example", verificationToken: "" }),
+    ).toBe("wss://t.example/");
+  });
+
+  test("throws a typed, actionable error when there is no public URL", () => {
+    // The skill scripts used to build this URL themselves and hit
+    // `undefined.replace` here, which surfaced as a TypeError with no
+    // indication that the recall path needs a reachable callback URL.
+    let err: unknown;
+    try {
+      realtimeEndpointUrl({ verificationToken: "t" });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MissingPublicWsUrlError);
+    const message = (err as Error).message;
+    expect(message).toContain("publicWsUrl");
+    expect(message).toContain("cloudflared");
+    expect(message).toContain("vellum");
   });
 });
 

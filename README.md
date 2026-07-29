@@ -158,11 +158,18 @@ started immediately; posting the active provider bounces its runtime).
 ## Configuration
 
 The host passes config to the `init` hook as `InitContext.config`. See
-[`src/config.ts`](src/config.ts) for the full schema. Required field:
+[`src/config.ts`](src/config.ts) for the full schema. The field that decides
+whether the plugin can work at all:
 
 | Field         | Description                                                              |
 | ------------- | ------------------------------------------------------------------------ |
 | `publicWsUrl` | Stable public base URL (`wss://…`) Recall dials back into for realtime.  |
+
+Only the `recall` provider needs it, and it needs it absolutely: Recall streams
+events from the internet, so with no reachable URL every join fails. When it is
+unset the plugin provisions a Cloudflare Tunnel at startup, which requires
+`cloudflared` on `PATH` — if that fails, set `publicWsUrl` explicitly or switch
+the provider to `vellum`, which joins calls itself and needs no public URL.
 
 ### API key
 

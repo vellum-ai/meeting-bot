@@ -74,6 +74,10 @@ const STYLES = `
   .field-saved { color: color-mix(in srgb, green 70%, CanvasText); }
   .field-error { color: color-mix(in srgb, red 70%, CanvasText); }
   .provider-note { font-size: 12px; opacity: 0.75; padding-top: 0; }
+  .provider-note-warning {
+    opacity: 1;
+    color: color-mix(in srgb, red 70%, CanvasText);
+  }
   input:disabled, select:disabled { opacity: 0.5; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td {
@@ -248,6 +252,11 @@ function Configuration({
 }) {
   const [fieldState, setFieldState] = useState<Record<string, FieldState>>({});
   const [providerNote, setProviderNote] = useState("");
+  /**
+   * True when the note reports that the new runtime cannot take a join. Those
+   * stay on screen; a plain confirmation fades.
+   */
+  const [providerNoteWarning, setProviderNoteWarning] = useState(false);
 
   function setField(field: string, state: FieldState) {
     setFieldState((prev) => ({ ...prev, [field]: state }));
@@ -302,6 +311,7 @@ function Configuration({
     setConfig({ ...config, provider });
     setField("provider", "saving");
     setProviderNote("");
+    setProviderNoteWarning(false);
     try {
       const res = await vfetch(`${BASE}/provider`, {
         method: "POST",
@@ -313,7 +323,14 @@ function Configuration({
         setConfig(body);
         setField("provider", "saved");
         setProviderNote(body.note || "");
-        setTimeout(() => setProviderNote(""), 5000);
+        // `noteUsable: false` means the switch landed on a runtime that cannot
+        // join (recall with nothing for Recall to dial back into). That has to
+        // stay readable until it is acted on; a confirmation can fade.
+        const warning = body.noteUsable === false;
+        setProviderNoteWarning(warning);
+        if (!warning) {
+          setTimeout(() => setProviderNote(""), 5000);
+        }
       } else {
         setConfig(previous);
         setField("provider", "error");
@@ -378,7 +395,13 @@ function Configuration({
               </select>
             </div>
             {providerNote ? (
-              <div className="row provider-note">{providerNote}</div>
+              <div
+                className={`row provider-note${
+                  providerNoteWarning ? " provider-note-warning" : ""
+                }`}
+              >
+                {providerNote}
+              </div>
             ) : null}
             <div className="row">
               <label htmlFor="region">Region</label>

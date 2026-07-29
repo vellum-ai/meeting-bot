@@ -108,9 +108,14 @@ export async function startJoinFromApp(
   }
 
   // Recall provider: create the bot directly against the Recall API.
-  let apiKey: string;
+  //
+  // The callback URL is settled before the credential is resolved: a config
+  // Recall could never stream back to is broken whether or not a key happens
+  // to be stored, and the skill scripts check in the same order so both entry
+  // points report the same problem first.
+  let endpointUrl: string;
   try {
-    apiKey = await resolveApiKey();
+    endpointUrl = realtimeEndpointUrl(config);
   } catch (err) {
     throw new JoinRequestError(
       err instanceof Error ? err.message : String(err),
@@ -118,9 +123,9 @@ export async function startJoinFromApp(
     );
   }
 
-  let endpointUrl: string;
+  let apiKey: string;
   try {
-    endpointUrl = realtimeEndpointUrl(config);
+    apiKey = await resolveApiKey();
   } catch (err) {
     throw new JoinRequestError(
       err instanceof Error ? err.message : String(err),

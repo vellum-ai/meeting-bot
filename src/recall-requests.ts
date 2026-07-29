@@ -87,6 +87,56 @@ export function buildCreateBotBody(opts: {
   return body;
 }
 
+/**
+ * Thrown when the realtime endpoint URL cannot be built because the recall
+ * path has nowhere for Recall to connect back to.
+ *
+ * Its own type so callers can turn it into their own kind of failure — the
+ * daemon join flow answers 409, the skill scripts print it — without matching
+ * on the message.
+ */
+export class MissingPublicWsUrlError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MissingPublicWsUrlError";
+  }
+}
+
+/**
+ * Build the realtime endpoint URL handed to Recall in the Create-Bot request.
+ *
+ * Recall connects to this exact URL, query string included. Per the Recall
+ * docs, a trailing `/` must precede any query parameters or the request is
+ * rejected with HTTP 400 — so the token (when present) is appended after a
+ * normalized trailing slash.
+ *
+ * Lives here, alongside {@link buildCreateBotBody}, because both the daemon
+ * and the standalone skill scripts create bots and must send the same URL. The
+ * scripts previously built it themselves and dropped the token, which the
+ * realtime server then rejected.
+ *
+ * Throws {@link MissingPublicWsUrlError} rather than returning something
+ * unusable: `publicWsUrl` is optional in config precisely because the plugin
+ * normally provisions a tunnel at startup, so its absence here means that did
+ * not happen and no bot should be created.
+ */
+export function realtimeEndpointUrl(config: {
+  publicWsUrl?: string;
+  verificationToken?: string;
+}): string {
+  if (!config.publicWsUrl) {
+    throw new MissingPublicWsUrlError(
+      "meeting-bot: the recall provider needs a publicly reachable URL for Recall to stream events back to, and publicWsUrl is not set. " +
+        "Either set publicWsUrl in the plugin's config.json, or install cloudflared so the plugin can provision a tunnel at startup, " +
+        'or switch the provider to "vellum", which joins calls itself and needs no public URL.',
+    );
+  }
+  const base = config.publicWsUrl.replace(/\/+$/, "");
+  const withSlash = `${base}/`;
+  if (!config.verificationToken) return withSlash;
+  return `${withSlash}?token=${encodeURIComponent(config.verificationToken)}`;
+}
+
 /** Headers for authenticated Recall Bot API requests. */
 export function recallAuthHeaders(apiKey: string): Record<string, string> {
   return {
