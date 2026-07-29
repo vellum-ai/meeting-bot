@@ -101,10 +101,10 @@ export function applyConfigUpdate(
 /**
  * Persist a provider change into `config.json` (merging like
  * {@link applyConfigUpdate}). Kept separate from the settings PATCH because a
- * provider switch carries side effects beyond the write: today it takes
- * effect on the next plugin reload (recall realtime receiver vs the Vellum
- * Runtime subprocess); future changes will trigger runtime switchover and
- * other side effects from the dedicated route that calls this.
+ * provider switch carries a side effect beyond the write: the route that
+ * calls this then bounces the provider runtime, so the old one (recall
+ * realtime receiver, or the Vellum Runtime worker) is down and the new one up
+ * before the response is sent.
  */
 export function applyProviderChange(
   configPath: string,

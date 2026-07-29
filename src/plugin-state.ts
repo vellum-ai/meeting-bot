@@ -1,13 +1,18 @@
 /**
  * Process-wide plugin state shared between hooks and tools.
  *
- * Hooks and tools run in the same in-process module graph, so the resolved
- * config the `init` hook produces is stashed here for the tools to read. This
- * avoids re-parsing `InitContext.config` in every tool and gives one place to
- * ask "is the plugin initialized yet?".
+ * The resolved config the `init` hook produces is stashed here rather than
+ * re-parsed in every tool, and gives one place to ask "is the plugin
+ * initialized yet?".
+ *
+ * What it cannot be is a dependency for anything that must work: the daemon
+ * caches hooks, tools, and routes independently and sweeps a plugin's whole
+ * module registry on redeploy, so a reader is not guaranteed to observe the
+ * instance the hook wrote to. A route that needs config for correctness reads
+ * `config.json` through `plugin-paths.ts` instead — that is what
+ * `restartProviderRuntime` does, after a live provider switch was seen to
+ * no-op against a stashed value the route could not see.
  */
-
-import type { InitContext } from "@vellumai/plugin-api";
 
 import type { MeetingBotConfig } from "./config.ts";
 
@@ -57,20 +62,4 @@ export function hasConfig(): boolean {
  */
 export function clearResolvedConfigForTests(): void {
   resolvedConfig = null;
-}
-
-/**
- * The InitContext the daemon handed the init hook, stashed so the provider
- * route can tear down and spin up provider runtimes live (it needs the
- * logger and the plugin storage dir, and the Vellum Runtime supervisor
- * takes the whole context).
- */
-let initContext: InitContext | null = null;
-
-export function setInitContext(ctx: InitContext): void {
-  initContext = ctx;
-}
-
-export function getInitContext(): InitContext | null {
-  return initContext;
 }

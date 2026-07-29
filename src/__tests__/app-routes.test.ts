@@ -171,12 +171,28 @@ describe("handleProviderPost validation", () => {
   });
 });
 
-describe("restartProviderRuntime", () => {
-  test("degrades to a note when the plugin has not initialized", async () => {
-    // In tests there is no stashed InitContext, so the restart must not touch
-    // any runtime and must say so.
-    const { restartProviderRuntime } = await import("../provider-runtime.ts");
-    const note = await restartProviderRuntime();
-    expect(note).toContain("not initialized");
+describe("providerRuntimeContext", () => {
+  // A live provider switch used to depend on an InitContext the init hook
+  // stashed in a module global. When the route did not observe that global the
+  // switch returned early: the old runtime kept running, and the note it
+  // returned read as "restart the assistant". Nothing is stashed now — the
+  // context is derived, so the route always has one and always bounces the
+  // runtime. Actually running the restart is not unit-testable: it spawns real
+  // subprocesses (and a tunnel).
+
+  test("is available with no init hook having run", async () => {
+    const { providerRuntimeContext } = await import("../provider-runtime.ts");
+    const ctx = providerRuntimeContext();
+    expect(typeof ctx.logger.warn).toBe("function");
+    expect(ctx.pluginStorageDir.length).toBeGreaterThan(0);
+  });
+
+  test("points at the same data directory the init hook is given", async () => {
+    // The daemon passes `<pluginDir>/data` as pluginStorageDir, which is what
+    // plugin-paths resolves. They must agree or a route-started runtime would
+    // read a different PID file than a hook-started one and fail to reap it.
+    const { providerRuntimeContext } = await import("../provider-runtime.ts");
+    const { pluginDataDir } = await import("../plugin-paths.ts");
+    expect(providerRuntimeContext().pluginStorageDir).toBe(pluginDataDir());
   });
 });

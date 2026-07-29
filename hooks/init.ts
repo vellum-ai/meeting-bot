@@ -21,11 +21,7 @@ import type { InitContext } from "@vellumai/plugin-api";
 
 import { resolveConfig } from "../src/config.ts";
 import { resolveAssistantName } from "../src/identity.ts";
-import {
-  setAssistantName,
-  setInitContext,
-  setResolvedConfig,
-} from "../src/plugin-state.ts";
+import { setAssistantName, setResolvedConfig } from "../src/plugin-state.ts";
 import {
   startProviderRuntime,
   writeResolvedConfigFile,
@@ -38,9 +34,6 @@ const init = async (ctx: InitContext): Promise<void> => {
   }
 
   setResolvedConfig(config);
-  // Stash the context so the provider route can tear down and spin up
-  // provider runtimes live (see src/provider-runtime.ts).
-  setInitContext(ctx);
 
   // Write the resolved config to the plugin's data directory so the skill
   // scripts (join, leave) can read it. The scripts run as standalone bun
