@@ -3,7 +3,8 @@
     {
       "path": "realtime",
       "kind": "websocket",
-      "description": "Realtime event stream the meeting provider dials into (transcript, participant, and lifecycle events)."
+      "description": "Realtime event stream Vellum forwards meeting events into (transcript, participant, and lifecycle events).",
+      "signer": "vellum"
     }
   ]
 }
