@@ -21,6 +21,8 @@ import {
   readConfigView,
 } from "./app-settings.ts";
 import { JoinRequestError, startJoinFromApp } from "./join-flow.ts";
+import { hasConfig, requireConfig } from "./plugin-state.ts";
+import { dispatchEvent, type Logger } from "./realtime-server.ts";
 import { readMeetingHistory } from "./meeting-history.ts";
 import { restartProviderRuntime } from "./provider-runtime.ts";
 import { pluginConfigPath, pluginDataDir } from "./plugin-paths.ts";
@@ -203,4 +205,66 @@ export async function handleProviderPost(request: Request): Promise<Response> {
   const view = applyProviderChange(pluginConfigPath(), parsed.data);
   const note = await restartProviderRuntime();
   return json({ ...view, note });
+}
+
+
+/**
+ * Console-backed logger for route handlers, matching the host's shape.
+ *
+ * Realtime dispatch takes a logger so the subprocess receiver can route its
+ * warnings through the daemon's. A route runs inside the daemon already, so
+ * plain console output lands in the same place.
+ */
+const routeLogger: Logger = {
+  info: (obj, msg) => console.log(msg ?? "", obj),
+  warn: (obj, msg) => console.warn(msg ?? "", obj),
+  error: (obj, msg) => console.error(msg ?? "", obj),
+  debug: () => {},
+};
+
+/**
+ * `POST /x/plugins/meeting-bot/realtime`: one realtime frame, delivered by
+ * the gateway from the public ingress socket declared in
+ * `channels/ingress.json`.
+ *
+ * The gateway terminates the WebSocket and posts each frame here as the raw
+ * body, one at a time and in order, so this handler sees exactly what the
+ * meeting provider sent. Frames are dispatched into the same session-store
+ * pipeline the subprocess receiver feeds, so both ingress paths produce
+ * identical transcript and participant state.
+ *
+ * A malformed frame is dropped with 204 rather than 4xx: the sender is a
+ * stream of events, not a client that can correct a request, and a non-2xx
+ * only produces gateway log noise.
+ */
+export async function handleRealtimePost(request: Request): Promise<Response> {
+  if (!hasConfig()) {
+    return json(
+      { error: "the plugin has not finished initializing; try again later" },
+      503,
+    );
+  }
+
+  const raw = await request.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    routeLogger.warn({}, "meeting-bot: dropping non-JSON realtime frame");
+    return new Response(null, { status: 204 });
+  }
+
+  const frame = parsed as { event?: unknown; data?: unknown } | null;
+  if (!frame || typeof frame.event !== "string") {
+    routeLogger.warn({}, "meeting-bot: dropping realtime frame with no event");
+    return new Response(null, { status: 204 });
+  }
+
+  dispatchEvent(
+    frame.event,
+    (frame.data as Record<string, unknown>) ?? {},
+    routeLogger,
+    requireConfig(),
+  );
+  return new Response(null, { status: 204 });
 }

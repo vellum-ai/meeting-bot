@@ -514,8 +514,14 @@ function handleSubprocessLine(
   }
 }
 
-/** Route a realtime event to the session store. */
-function dispatchEvent(
+/**
+ * Route a realtime event to the session store.
+ *
+ * Shared by both realtime sources: the subprocess receiver relaying frames
+ * from its own WebSocket listener, and the plugin route the gateway posts
+ * gateway-terminated frames to.
+ */
+export function dispatchEvent(
   eventName: string,
   data: Record<string, unknown>,
   logger: Logger,

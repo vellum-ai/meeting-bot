@@ -42,6 +42,15 @@ import ingressJson from "../../../channels/ingress.json" with { type: "json" };
 export const IngressRouteKindSchema = z.enum(["http", "websocket"]);
 export type IngressRouteKind = z.infer<typeof IngressRouteKindSchema>;
 
+/**
+ * Whose `webhook_secret` signs requests to a route. `plugin` (the default)
+ * means this plugin's own credential, for callbacks it arranged itself.
+ * `vellum` means the platform's, for routes only Vellum calls, and the
+ * gateway serves those without a separate guardian approval.
+ */
+export const IngressSignerSchema = z.enum(["plugin", "vellum"]);
+export type IngressSigner = z.infer<typeof IngressSignerSchema>;
+
 /** One publicly reachable route this plugin is asking the gateway to expose. */
 export const IngressRouteSchema = z.object({
   /**
@@ -73,6 +82,7 @@ export const IngressRouteSchema = z.object({
       message: "path must not contain . or .. segments",
     }),
   kind: IngressRouteKindSchema,
+  signer: IngressSignerSchema.default("plugin"),
   /** Human-readable purpose, surfaced in gateway logs and admin UI. */
   description: z.string().min(1),
 });

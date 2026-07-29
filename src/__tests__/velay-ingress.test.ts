@@ -73,16 +73,22 @@ describe("channels/ingress.json", () => {
     expect(route.kind).toBe("websocket");
   });
 
-  test("declares reach only — no version, plugin name, or auth", () => {
-    // The format is the assistant's, the plugin identity is known from
-    // where the file was read, and auth belongs to whoever mints the
-    // credential.
+  test("declares reach only: no version, plugin name, or credential", () => {
+    // The format is the assistant's, and the plugin identity is known from
+    // where the file was read. `signer` names whose key opens the route, not
+    // the key itself, which belongs to whoever mints it.
     expect(Object.keys(MEETING_BOT_INGRESS_MANIFEST).sort()).toEqual([
       "routes",
     ]);
     expect(Object.keys(MEETING_BOT_INGRESS_MANIFEST.routes[0]!).sort()).toEqual(
-      ["description", "kind", "path"],
+      ["description", "kind", "path", "signer"],
     );
+  });
+
+  test("asks Vellum to sign, so the gateway serves it without approval", () => {
+    // Meeting events reach the assistant through Vellum, not from a third
+    // party the plugin arranged with itself.
+    expect(MEETING_BOT_INGRESS_MANIFEST.routes[0]!.signer).toBe("vellum");
   });
 
   test("composes to the absolute path the contract advertises", () => {
