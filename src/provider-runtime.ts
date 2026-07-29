@@ -96,11 +96,17 @@ export function writeResolvedConfigFile(
 /**
  * Start the runtime for the configured provider. Non-fatal on failure (logs
  * and returns) so a broken runtime never takes the plugin down with it.
+ *
+ * Returns the config as actually realized, which differs from the config
+ * passed in when a tunnel was provisioned: `publicWsUrl` is filled in. Callers
+ * that need to report on the result read it from there rather than re-deriving
+ * it — {@link restartProviderRuntime} uses it to tell the operator when the
+ * recall path came up with nowhere for Recall to connect back to.
  */
 export async function startProviderRuntime(
   ctx: ProviderRuntimeContext,
   config: MeetingBotConfig,
-): Promise<void> {
+): Promise<MeetingBotConfig> {
   if (config.provider === "vellum") {
     try {
       await initVellumRuntime(ctx, config);
@@ -110,7 +116,7 @@ export async function startProviderRuntime(
         "meeting-bot: failed to initialize the Vellum Runtime: joins will fail until this is resolved",
       );
     }
-    return;
+    return config;
   }
 
   // Surface a missing API-key credential early (non-fatal): the realtime
@@ -175,6 +181,8 @@ export async function startProviderRuntime(
       "meeting-bot: failed to start realtime server — bots can still be created but realtime events will not be received until this is resolved",
     );
   }
+
+  return config;
 }
 
 /**
@@ -203,9 +211,9 @@ export async function stopProviderRuntimes(logger: Logger): Promise<void> {
  * the `init` hook ran in this module instance: the config comes from
  * `config.json`, the data directory from `plugin-paths.ts`, and the runtimes
  * find any worker this process has lost track of through their PID files.
- * Returns a human-readable note for the route response.
+ * Returns what to report about the runtime that came up.
  */
-export async function restartProviderRuntime(): Promise<string> {
+export async function restartProviderRuntime(): Promise<ProviderRestartOutcome> {
   const ctx = providerRuntimeContext();
 
   const path = pluginConfigPath();
@@ -229,7 +237,41 @@ export async function restartProviderRuntime(): Promise<string> {
     "meeting-bot: restarting provider runtime",
   );
   await stopProviderRuntimes(ctx.logger);
-  await startProviderRuntime(ctx, config);
+  return providerRestartNote(await startProviderRuntime(ctx, config));
+}
 
-  return `provider runtime restarted (${config.provider})`;
+export interface ProviderRestartOutcome {
+  /** Human-readable summary for the app to show. */
+  note: string;
+  /**
+   * Whether the runtime that came up can actually take a join. False keeps the
+   * note on screen instead of letting it fade like a confirmation.
+   */
+  usable: boolean;
+}
+
+/**
+ * What to tell the operator about a runtime that just came up.
+ *
+ * The runtime starts either way, but on the recall path "started" is not the
+ * same as usable: Recall dials the receiver from the internet, so without a
+ * reachable URL every join fails. Saying so at switch time is the point of
+ * switching in the app — otherwise the first sign is a join failing later, well
+ * away from the change that caused it.
+ */
+export function providerRestartNote(
+  config: MeetingBotConfig,
+): ProviderRestartOutcome {
+  if (config.provider === "recall" && !config.publicWsUrl) {
+    return {
+      note:
+        "Switched to recall, but joins will fail: nothing is reachable for Recall to stream events back to. " +
+        "Set publicWsUrl in config.json, install cloudflared so a tunnel can be provisioned, or switch back to vellum.",
+      usable: false,
+    };
+  }
+  return {
+    note: `provider runtime restarted (${config.provider})`,
+    usable: true,
+  };
 }

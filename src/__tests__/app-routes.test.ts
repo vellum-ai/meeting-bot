@@ -196,3 +196,41 @@ describe("providerRuntimeContext", () => {
     expect(providerRuntimeContext().pluginStorageDir).toBe(pluginDataDir());
   });
 });
+
+describe("providerRestartNote", () => {
+  const base = { region: "us-east-1", listenPort: 8790 } as unknown as Parameters<
+    typeof import("../provider-runtime.ts").providerRestartNote
+  >[0];
+
+  test("warns, and stays on screen, when recall has no callback URL", async () => {
+    // The state a switch to recall lands in when no publicWsUrl is configured
+    // and no tunnel could be provisioned. The switch itself succeeds, so this
+    // note is the only place it surfaces before a join fails.
+    const { providerRestartNote } = await import("../provider-runtime.ts");
+    const { note, usable } = providerRestartNote({ ...base, provider: "recall" });
+    expect(usable).toBe(false);
+    expect(note).toContain("joins will fail");
+    expect(note).toContain("publicWsUrl");
+    expect(note).toContain("cloudflared");
+  });
+
+  test("confirms plainly when recall has a URL", async () => {
+    const { providerRestartNote } = await import("../provider-runtime.ts");
+    expect(
+      providerRestartNote({
+        ...base,
+        provider: "recall",
+        publicWsUrl: "wss://tunnel.example",
+      }),
+    ).toEqual({ note: "provider runtime restarted (recall)", usable: true });
+  });
+
+  test("does not ask the vellum path for a public URL", async () => {
+    // The Vellum Runtime joins calls itself; nothing dials in from outside.
+    const { providerRestartNote } = await import("../provider-runtime.ts");
+    expect(providerRestartNote({ ...base, provider: "vellum" })).toEqual({
+      note: "provider runtime restarted (vellum)",
+      usable: true,
+    });
+  });
+});

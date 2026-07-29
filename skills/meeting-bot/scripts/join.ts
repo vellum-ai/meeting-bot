@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { parseIdentityName } from "../../../src/identity.ts";
+import { MissingPublicWsUrlError } from "../../../src/recall-requests.ts";
 import {
   addSession,
   botStatusCode,
@@ -300,7 +301,11 @@ async function main(): Promise<void> {
     console.log(`Live transcript and participant events will stream to the realtime receiver.`);
     console.log(`Use leave.ts with this bot id to end it: --bot-id ${bot.id}`);
   } catch (err) {
-    if (err instanceof RecallApiError) {
+    if (err instanceof MissingPublicWsUrlError) {
+      // No bot was created: the config cannot receive events at all. Reported
+      // as its own thing so it does not read as a Recall-side failure.
+      console.error(err.message);
+    } else if (err instanceof RecallApiError) {
       const hint =
         err.status === 507
           ? " Recall reported no capacity (507); retry in ~30s."

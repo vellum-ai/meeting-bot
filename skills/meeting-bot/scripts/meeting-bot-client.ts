@@ -18,6 +18,7 @@ import { join, resolve } from "node:path";
 
 import {
   buildCreateBotBody,
+  realtimeEndpointUrl,
   recallAuthHeaders,
 } from "../../../src/recall-requests.ts";
 
@@ -86,7 +87,14 @@ export function sessionsFilePath(): string {
 
 export interface ResolvedConfig {
   region: string;
-  publicWsUrl: string;
+  /**
+   * Absent whenever the recall path has no reachable callback URL: none was
+   * configured and no tunnel was provisioned. Optional here because that is
+   * what the file on disk actually looks like — typing it as `string` is how a
+   * missing URL used to surface as a TypeError deep in bot creation instead of
+   * an error naming the fix.
+   */
+  publicWsUrl?: string;
   listenPort: number;
   verificationToken: string;
   transcript: {
@@ -137,9 +145,10 @@ export class RecallApiError extends Error {
   }
 }
 
-// Request building (recording config, silent MP3, auth headers) is shared
-// with the daemon-side join flow via src/recall-requests.ts, which is
-// dependency-free on purpose so this standalone script can import it.
+// Request building (recording config, silent MP3, the realtime endpoint URL,
+// auth headers) is shared with the daemon-side join flow via
+// src/recall-requests.ts, which is dependency-free on purpose so this
+// standalone script can import it.
 const authHeaders = recallAuthHeaders;
 
 /**
@@ -151,10 +160,14 @@ export async function createBot(
   meetingUrl: string,
   opts: { botName?: string } = {},
 ): Promise<RecallBot> {
+  // Before the credential shell-out: a config that cannot receive events
+  // fails the same way whether or not a key happens to be stored, and
+  // MissingPublicWsUrlError is the more useful of the two messages.
+  const endpointUrl = realtimeEndpointUrl(config);
   const apiKey = getApiKey();
   const body = buildCreateBotBody({
     meetingUrl,
-    endpointUrl: config.publicWsUrl.replace(/\/+$/, "") + "/",
+    endpointUrl,
     ...(config.transcript ? { transcript: config.transcript } : {}),
     ...(opts.botName ? { botName: opts.botName } : {}),
   });
