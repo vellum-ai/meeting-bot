@@ -34,13 +34,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import type { InitContext } from "@vellumai/plugin-api";
-
 import type { MeetingBotConfig } from "../config.ts";
 import { resolveAssistantName } from "../identity.ts";
 import { upsertHistoryEntry } from "../meeting-history.ts";
 import { augmentedSpawnEnv } from "../path-env.ts";
 import { pluginDataDir } from "../plugin-paths.ts";
+import type { ProviderRuntimeContext } from "../provider-runtime.ts";
 import {
   clearTranscriptBuffer,
   ingestUtterance,
@@ -95,7 +94,9 @@ function vellumPidFilePath(): string {
  * `<workspace>/plugins-data/<name>`), then the storage dir itself with a
  * warning.
  */
-export function resolveWorkspaceDirFromContext(ctx: InitContext): string {
+export function resolveWorkspaceDirFromContext(
+  ctx: ProviderRuntimeContext,
+): string {
   const fromEnv = process.env.VELLUM_WORKSPACE_DIR;
   if (fromEnv && fromEnv.trim().length > 0) return fromEnv;
 
@@ -343,7 +344,7 @@ function handleWorkerMessage(
  * Idempotent: a second call while running is a no-op.
  */
 export async function initVellumRuntime(
-  ctx: InitContext,
+  ctx: ProviderRuntimeContext,
   config: MeetingBotConfig,
 ): Promise<void> {
   if (running) return;

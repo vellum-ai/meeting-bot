@@ -22,10 +22,11 @@ import {
 } from "./app-settings.ts";
 import { JoinRequestError, startJoinFromApp } from "./join-flow.ts";
 import { hasConfig, requireConfig } from "./plugin-state.ts";
-import { dispatchEvent, type Logger } from "./realtime-server.ts";
+import { dispatchEvent } from "./realtime-server.ts";
 import { readMeetingHistory } from "./meeting-history.ts";
 import { restartProviderRuntime } from "./provider-runtime.ts";
 import { pluginConfigPath, pluginDataDir } from "./plugin-paths.ts";
+import { routeLogger } from "./route-logger.ts";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -206,21 +207,6 @@ export async function handleProviderPost(request: Request): Promise<Response> {
   const note = await restartProviderRuntime();
   return json({ ...view, note });
 }
-
-
-/**
- * Console-backed logger for route handlers, matching the host's shape.
- *
- * Realtime dispatch takes a logger so the subprocess receiver can route its
- * warnings through the daemon's. A route runs inside the daemon already, so
- * plain console output lands in the same place.
- */
-const routeLogger: Logger = {
-  info: (obj, msg) => console.log(msg ?? "", obj),
-  warn: (obj, msg) => console.warn(msg ?? "", obj),
-  error: (obj, msg) => console.error(msg ?? "", obj),
-  debug: () => {},
-};
 
 /**
  * `POST /x/plugins/meeting-bot/realtime`: one realtime frame, delivered by

@@ -13,12 +13,16 @@
  * bounces the runtime; the provider route calls it so a provider change (or a
  * same-provider reload) takes effect immediately instead of waiting for the
  * next plugin load.
+ *
+ * None of this depends on state left behind by the `init` hook. A runtime is
+ * driven from a logger and the plugin's data directory ({@link
+ * ProviderRuntimeContext}), both of which a route can produce on its own, so a
+ * live switch works whether or not it shares a module instance with the hook
+ * that started the runtime it is replacing.
  */
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-
-import type { InitContext } from "@vellumai/plugin-api";
 
 import {
   CREDENTIAL_FIELD,
@@ -30,15 +34,49 @@ import {
   type MeetingBotConfig,
 } from "./config.ts";
 import { setupInbound, teardownInbound } from "./inbound.ts";
-import { pluginConfigPath } from "./plugin-paths.ts";
-import { getInitContext, setResolvedConfig } from "./plugin-state.ts";
-import { startRealtimeServer, stopRealtimeServer } from "./realtime-server.ts";
+import { pluginConfigPath, pluginDataDir } from "./plugin-paths.ts";
+import { setResolvedConfig } from "./plugin-state.ts";
+import { routeLogger } from "./route-logger.ts";
+import {
+  startRealtimeServer,
+  stopRealtimeServer,
+  type Logger,
+} from "./realtime-server.ts";
 import { initVellumRuntime, shutdownVellumRuntime } from "./vellum/runtime.ts";
 import { existsSync, readFileSync } from "node:fs";
 
+/**
+ * What a provider runtime needs from whoever is driving it: somewhere to log,
+ * and the plugin's writable data directory (PID files, resolved-config.json,
+ * IDENTITY.md).
+ *
+ * The daemon's `InitContext` satisfies this structurally, so the `init` hook
+ * passes its own. A route has no context to pass and builds one instead — see
+ * {@link restartProviderRuntime}. Narrowing to these two fields is what makes
+ * that possible: everything else the runtimes need is derived from the
+ * plugin's own location (`plugin-paths.ts`).
+ */
+export interface ProviderRuntimeContext {
+  logger: Logger;
+  pluginStorageDir: string;
+}
+
+/**
+ * The context a route drives a provider runtime with, built from the plugin's
+ * own location rather than read from anywhere.
+ *
+ * `pluginStorageDir` is the same directory the daemon passes the `init` hook
+ * (`<pluginDir>/data`), reached here through `plugin-paths.ts`, so a runtime
+ * started from a route reads and writes exactly what one started from the hook
+ * does — same PID files, same `resolved-config.json`.
+ */
+export function providerRuntimeContext(): ProviderRuntimeContext {
+  return { logger: routeLogger, pluginStorageDir: pluginDataDir() };
+}
+
 /** Write resolved-config.json so the skill scripts see the current config. */
 export function writeResolvedConfigFile(
-  ctx: InitContext,
+  ctx: ProviderRuntimeContext,
   config: MeetingBotConfig,
 ): void {
   try {
@@ -60,7 +98,7 @@ export function writeResolvedConfigFile(
  * and returns) so a broken runtime never takes the plugin down with it.
  */
 export async function startProviderRuntime(
-  ctx: InitContext,
+  ctx: ProviderRuntimeContext,
   config: MeetingBotConfig,
 ): Promise<void> {
   if (config.provider === "vellum") {
@@ -142,11 +180,18 @@ export async function startProviderRuntime(
 /**
  * Stop every provider runtime. Each stop is a safe no-op when that runtime is
  * not running, so this is callable regardless of which provider is active.
+ *
+ * Takes only a logger: a stop never needs to know where the plugin's data
+ * lives, and both runtimes fall back to reaping their recorded PID when this
+ * process no longer holds the child handle (see `worker-pidfile.ts`). So a
+ * teardown is worth attempting even when nothing here looks like it is
+ * running — that fallback is the only thing that takes down a worker whose
+ * supervisor state was lost.
  */
-export async function stopProviderRuntimes(ctx: InitContext): Promise<void> {
-  await shutdownVellumRuntime(ctx.logger);
+export async function stopProviderRuntimes(logger: Logger): Promise<void> {
+  await shutdownVellumRuntime(logger);
   await stopRealtimeServer();
-  await teardownInbound(ctx.logger);
+  await teardownInbound(logger);
 }
 
 /**
@@ -154,15 +199,14 @@ export async function stopProviderRuntimes(ctx: InitContext): Promise<void> {
  * down, then start the one the (possibly just-changed) config selects. Used
  * by the provider route for live switches and same-provider reloads.
  *
- * Returns a human-readable note for the route response. When the plugin has
- * not initialized (no stashed InitContext, e.g. in unit tests), the config
- * write still stands and the note says the runtime was not touched.
+ * Runs entirely off the plugin's own location, so it does not matter whether
+ * the `init` hook ran in this module instance: the config comes from
+ * `config.json`, the data directory from `plugin-paths.ts`, and the runtimes
+ * find any worker this process has lost track of through their PID files.
+ * Returns a human-readable note for the route response.
  */
 export async function restartProviderRuntime(): Promise<string> {
-  const ctx = getInitContext();
-  if (!ctx) {
-    return "provider saved; runtime not restarted (plugin not initialized)";
-  }
+  const ctx = providerRuntimeContext();
 
   const path = pluginConfigPath();
   let raw: unknown = {};
@@ -184,7 +228,7 @@ export async function restartProviderRuntime(): Promise<string> {
     { provider: config.provider },
     "meeting-bot: restarting provider runtime",
   );
-  await stopProviderRuntimes(ctx);
+  await stopProviderRuntimes(ctx.logger);
   await startProviderRuntime(ctx, config);
 
   return `provider runtime restarted (${config.provider})`;
